@@ -1,0 +1,2710 @@
+<title>Handover Engine</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: fixed 3D scene behind a compact hero, then a two-column tool.
+   Left: raw activity in. Right: the handover packet out.
+   The scene starts scattered and locks into a packet cube when a handover is generated. */
+:root {
+  --bg: #ffffff;
+  --panel: rgba(255, 255, 255, 0.9);
+  --field: #fff5f4;
+  --fg: #1a0b0b;
+  --muted: #6f5957;
+  --line: #f1cdc9;
+  --red: #e10600;
+  --red-hot: #cf0a00;
+  --red-deep: #f7c9c5;
+  --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.5;
+  padding-block: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  overflow-x: hidden;
+}
+:focus-visible { outline: 2px solid var(--red-hot); outline-offset: 3px; }
+
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; display: block; }
+.veil {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0.55;
+  background:
+    radial-gradient(ellipse at 72% 22%, rgba(225, 6, 0, 0.16), transparent 55%),
+    radial-gradient(ellipse at center, transparent 40%, rgba(255, 255, 255, 0.85) 100%),
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 100% 72px,
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 72px 100%;
+}
+.frags { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.frag {
+  position: absolute; font-family: var(--mono); font-size: 12px; color: var(--red-hot); opacity: 0.26;
+  white-space: nowrap; border: 1px solid var(--red-deep); padding: 4px 8px; background: rgba(255, 255, 255, 0.7);
+  animation: drift 14s ease-in-out infinite alternate;
+}
+@keyframes drift { from { transform: translate(0, 0) rotate(-2deg); } to { transform: translate(26px, -34px) rotate(2deg); } }
+
+.wrap { position: relative; z-index: 1; max-width: 1240px; margin-inline: auto; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 20px; }
+.brand { font-family: var(--display); font-weight: 900; font-size: 1.5rem; letter-spacing: 0.06em; text-transform: uppercase; display: flex; align-items: center; gap: 10px; }
+.brand i { width: 14px; height: 14px; background: var(--red); display: inline-block; transform: rotate(45deg); box-shadow: 0 0 14px var(--red); }
+.nav { display: flex; gap: 24px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+.nav a { text-decoration: none; color: var(--muted); }
+.nav a:hover { color: var(--red-hot); }
+
+.hero { padding-block: clamp(20px, 4vw, 56px) clamp(28px, 4vw, 48px); max-width: 680px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--red-hot); display: flex; align-items: center; gap: 12px; }
+.eyebrow::before { content: ""; width: 36px; height: 2px; background: var(--red); }
+h1, h2, h3, h4 { font-family: var(--display); text-transform: uppercase; line-height: 0.95; margin: 0; text-wrap: balance; }
+h1 { font-weight: 900; font-size: clamp(3rem, 8vw, 6rem); margin-top: 18px; }
+h1 em, h2 em { font-style: normal; color: var(--red); text-shadow: none; }
+.lede { max-width: 54ch; color: #4a3634; font-size: 1.1rem; margin: 20px 0 0; }
+
+.app { display: grid; gap: 22px; grid-template-columns: minmax(0, 430px) minmax(0, 1fr); align-items: start; padding-bottom: 40px; }
+@media (max-width: 980px) { .app { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); padding: 20px; backdrop-filter: blur(8px); min-width: 0; }
+.input-panel { display: grid; gap: 16px; }
+@media (min-width: 981px) { .input-panel { position: sticky; top: 16px; } }
+.panel-title { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--red-hot); }
+.field { display: grid; gap: 6px; min-width: 0; }
+.lbl { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+input[type=text], input[type=password], input[type=date], textarea, select {
+  background: var(--field); color: var(--fg); border: 1px solid var(--line); font-family: var(--mono); font-size: 13px;
+  padding: 10px 12px; width: 100%; border-radius: 0; min-width: 0;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--red); }
+textarea { min-height: 340px; resize: vertical; line-height: 1.5; font-size: 12px; white-space: pre; overflow: auto; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 520px) { .row2 { grid-template-columns: 1fr; } }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 0.92rem; color: #4a3634; }
+.check input { accent-color: var(--red); margin-top: 4px; }
+.btns { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; text-decoration: none;
+  padding: 13px 18px; border: 1px solid var(--red); color: var(--fg); background: transparent; cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+.btn.solid { background: var(--red); color: #fff; }
+.btn:hover { background: var(--red-hot); border-color: var(--red-hot); color: #fff; }
+.btn.ghost { border-color: var(--line); color: var(--muted); }
+.btn.ghost:hover { background: transparent; border-color: var(--red); color: var(--fg); }
+.help { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.help summary { cursor: pointer; color: var(--red-hot); }
+.help code { color: var(--fg); }
+.help p { margin: 8px 0 0; }
+.searchrow { display: grid; gap: 6px; margin: 12px 0 4px; }
+.approval { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--line); font-size: 0.95rem; }
+.approval.done { border-color: var(--red); background: rgba(225, 6, 0, 0.08); }
+.approval b { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.04em; font-size: 1.25rem; display: block; }
+.approval span { display: block; font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 4px; }
+.gh .field { margin-top: 10px; }
+.gh .btns { margin-top: 12px; }
+.ghmsg { min-height: 1.2em; color: var(--muted); }
+.ghmsg.err { color: #a30a00; }
+.ghmsg.ok { color: var(--fg); }
+
+.out { display: grid; gap: 22px; min-width: 0; }
+.head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 22px 28px; align-items: center; }
+@media (max-width: 560px) { .head { grid-template-columns: minmax(0, 1fr); } }
+.big { font-family: var(--display); font-weight: 900; font-size: clamp(4.5rem, 12vw, 6.6rem); line-height: 0.82; color: var(--red-hot); text-shadow: none; font-variant-numeric: tabular-nums; }
+.big small { font-size: 0.4em; color: var(--muted); text-shadow: none; }
+.band { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.who h2 { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 900; margin-top: 4px; }
+.who .meta { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.bar { height: 10px; background: #fbe9e7; border: 1px solid var(--line); margin-top: 14px; }
+.bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--red-deep), var(--red-hot)); width: 0; transition: width 0.6s ease; }
+.funnel { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.funnel b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+.funnel .arr { color: var(--red); }
+.counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+.counts div { border: 1px solid var(--line); padding: 10px 12px; }
+.counts b { font-family: var(--display); font-size: 1.9rem; font-weight: 900; display: block; line-height: 1; color: var(--red-hot); font-variant-numeric: tabular-nums; }
+.counts span { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; align-items: center; }
+.tab { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; background: transparent; color: var(--muted); border: 0; padding: 12px 18px; cursor: pointer; }
+.tab[aria-selected="true"] { color: var(--fg); box-shadow: inset 0 -3px 0 var(--red-hot); background: var(--red-deep); }
+.tabs .spacer { flex: 1; }
+.tabs .btn { padding: 8px 14px; margin: 4px 0 4px 8px; }
+
+.group h3 { font-size: 1.6rem; font-weight: 800; letter-spacing: 0.02em; padding-bottom: 8px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.group h3 span { font-family: var(--mono); font-size: 12px; color: var(--muted); font-weight: 400; letter-spacing: 0.08em; }
+.group + .group { margin-top: 26px; }
+.it { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 16px 0; border-bottom: 1px dashed #f0cfcc; }
+.it:last-child { border-bottom: 0; }
+.it input[type=checkbox] { accent-color: var(--red); width: 18px; height: 18px; margin-top: 3px; cursor: pointer; }
+.it .l1 { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: flex-start; justify-content: space-between; }
+.it .title { font-weight: 600; font-size: 1.04rem; min-width: 0; overflow-wrap: anywhere; flex: 1 1 260px; }
+.it.resolved .title { text-decoration: line-through; opacity: 0.5; }
+.it.resolved { opacity: 0.7; }
+.it .fact { margin: 6px 0 0; color: #6b5553; font-size: 0.93rem; }
+.it .next { margin: 6px 0 0; font-size: 0.93rem; color: #2a1514; }
+.it .next b { font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--red-hot); margin-right: 6px; }
+.it .meta { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.it .meta select { width: auto; padding: 6px 8px; font-size: 12px; max-width: 100%; }
+.it details { margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.it summary { cursor: pointer; color: var(--muted); }
+.it summary:hover { color: var(--red-hot); }
+.it ol { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.it ol li { overflow-wrap: anywhere; }
+.pill { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border: 1px solid; white-space: nowrap; }
+.pill.risk { color: #a30a00; border-color: var(--red-hot); background: rgba(225, 6, 0, 0.1); }
+.pill.none { color: #fff; border-color: var(--red); background: var(--red); }
+.pill.ok { color: #5a4745; border-color: #c9a9a6; }
+.done-list { font-family: var(--mono); font-size: 12px; color: var(--muted); display: grid; gap: 6px; margin-top: 12px; }
+.done-list li { list-style: none; }
+.done-list li::before { content: "✓ "; color: var(--red-hot); }
+
+pre.md { margin: 0; padding: 16px; background: var(--field); border: 1px solid var(--line); font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: #2a1514; max-height: 70vh; overflow: auto; }
+.empty { text-align: left; padding: 8px 0; }
+.empty h3 { font-size: 2rem; font-weight: 900; }
+.empty p { color: #4a3634; max-width: 56ch; margin: 12px 0 0; }
+
+section.info { padding-block: clamp(36px, 6vw, 72px); }
+section.info h2 { font-weight: 900; font-size: clamp(2rem, 4.4vw, 3.2rem); margin-top: 14px; }
+.pipe { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(6px); margin-top: 30px; }
+.stage { padding: 24px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -1px -1px 0; min-width: 0; }
+.stage .n { font-family: var(--mono); font-size: 12px; color: var(--red-hot); letter-spacing: 0.14em; }
+.stage h3 { font-weight: 800; font-size: 1.8rem; margin-top: 8px; }
+.stage p { color: #4a3634; margin: 10px 0 0; font-size: 0.96rem; }
+.two { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); margin-top: 18px; }
+.two .panel h4 { font-size: 1.4rem; font-weight: 800; }
+.two ul { margin: 12px 0 0; padding-left: 18px; color: #4a3634; font-size: 0.95rem; display: grid; gap: 6px; }
+footer { padding-block: 40px 70px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+.glow { position: fixed; left: 0; top: 0; width: 560px; height: 560px; margin: -280px 0 0 -280px; z-index: 0; pointer-events: none; background: radial-gradient(circle, rgba(225, 6, 0, 0.14), transparent 62%); transform: translate(-999px, -999px); }
+.frag { transition: opacity 1.2s ease; }
+body.assembled .frag { opacity: 0.07; }
+.herorow { display: grid; grid-template-columns: minmax(0, 680px) minmax(0, 1fr); gap: 20px; align-items: stretch; }
+.herobtns { margin-top: 26px; }
+.grab { position: relative; min-height: 380px; cursor: grab; touch-action: pan-y; user-select: none; }
+.grab:active { cursor: grabbing; }
+.hint { position: absolute; right: 0; bottom: 12px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); padding: 6px 10px; background: rgba(255, 255, 255, 0.7); }
+.stage { background: radial-gradient(220px circle at var(--mx, -999px) var(--my, -999px), rgba(225, 6, 0, 0.2), transparent 70%); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 0 4px; }
+.chip { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); background: transparent; border: 1px solid var(--line); padding: 7px 12px; cursor: pointer; }
+.chip:hover { border-color: var(--red); color: var(--fg); }
+.chip[aria-pressed="true"] { background: var(--red); border-color: var(--red); color: #fff; }
+.openonly .it.resolved { display: none; }
+.it.flash { animation: flash 1.8s ease; }
+@keyframes flash { 0%, 60% { background: rgba(225, 6, 0, 0.24); } 100% { background: transparent; } }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 16px 0 10px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
+.legend i.sq { border-radius: 0; border: 1px solid #1a0b0b; background: #fff; }
+.gwrap { position: relative; border: 1px solid var(--line); background: radial-gradient(circle at 50% 50%, rgba(225, 6, 0, 0.14), rgba(255, 255, 255, 0.92) 72%); overflow: hidden; min-height: 360px; }
+.gcanvas { display: block; max-width: 100%; cursor: grab; touch-action: pan-y; }
+.tip { position: absolute; z-index: 2; max-width: 240px; pointer-events: none; background: #ffffff; border: 1px solid var(--red); padding: 10px 12px; font-size: 13px; line-height: 1.4; }
+.tip b { font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--red-hot); display: block; margin-bottom: 4px; }
+.tip span { display: block; color: #6b5553; font-size: 12px; margin-top: 6px; font-family: var(--mono); }
+.plan { display: grid; gap: 28px; padding-top: 18px; }
+.plan h3 { font-size: 1.5rem; font-weight: 800; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.count { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.start { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 12px; }
+.start li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 12px 14px; border: 1px solid var(--line); background: rgba(255, 244, 243, 0.85); }
+.start .rank { font-family: var(--display); font-weight: 900; font-size: 2rem; line-height: 1; color: var(--red-hot); }
+.start .tt { font-weight: 600; overflow-wrap: anywhere; }
+.start .nx { color: #6b5553; font-size: 0.92rem; margin-top: 4px; }
+.cal { display: grid; gap: 12px; margin-top: 12px; }
+.calrow { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 520px) { .calrow { grid-template-columns: minmax(0, 1fr); } }
+.calrow .d { font-family: var(--mono); font-size: 12px; color: var(--red-hot); border: 1px solid var(--red-deep); padding: 6px 8px; text-align: center; }
+.calrow .d small { display: block; color: var(--muted); font-size: 11px; }
+.calrow ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 0.93rem; min-width: 0; }
+.calrow li { overflow-wrap: anywhere; }
+.calrow li em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); margin-right: 8px; text-transform: uppercase; }
+.loadrow { display: grid; grid-template-columns: 130px minmax(0, 1fr) 28px; gap: 12px; align-items: center; font-family: var(--mono); font-size: 12px; margin-top: 10px; }
+.loadrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loadrow .tr { height: 10px; background: #fbe9e7; border: 1px solid var(--line); }
+.loadrow .tr i { display: block; height: 100%; background: linear-gradient(90deg, var(--red-deep), var(--red-hot)); }
+.weeks { display: flex; gap: 8px; align-items: flex-end; height: 140px; margin-top: 14px; overflow-x: auto; padding-bottom: 4px; }
+.wk { flex: 1 0 44px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; height: 100%; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.wk i { display: block; width: 100%; background: linear-gradient(0deg, var(--red-deep), var(--red-hot)); min-height: 3px; }
+.tab { padding: 12px 14px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: -8px; }
+.agenda { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 10px; }
+.agenda li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 14px; padding: 12px 14px; border: 1px solid var(--line); background: rgba(255, 244, 243, 0.85); }
+.agenda .tm { font-family: var(--mono); font-size: 12px; color: var(--red-hot); padding-top: 3px; }
+.agenda .tt { font-weight: 600; overflow-wrap: anywhere; }
+.qs { margin: 8px 0 0; padding-left: 18px; color: #6b5553; font-size: 0.92rem; display: grid; gap: 4px; }
+.qs li { display: list-item; border: 0; padding: 0; background: none; }
+.contacts { display: grid; gap: 0; margin-top: 12px; }
+.contact { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 0; border-bottom: 1px dashed #f0cfcc; }
+.contact .nm { font-weight: 600; overflow-wrap: anywhere; }
+.contact .nt { grid-column: 1 / -1; color: #6b5553; font-size: 0.92rem; overflow-wrap: anywhere; }
+.ckprog { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--red-hot); }
+.cklist { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 0; }
+.cklist label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 9px 0; border-bottom: 1px dashed #f0cfcc; cursor: pointer; }
+.cklist input, .signoff input { accent-color: var(--red); width: 18px; height: 18px; margin-top: 2px; }
+.cklist .tx { overflow-wrap: anywhere; }
+.cklist .due { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; padding-top: 3px; }
+.cklist li.resolved .tx { text-decoration: line-through; opacity: 0.5; }
+.signoff { display: grid; gap: 8px; margin-top: 12px; }
+.signoff label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px 14px; border: 1px solid var(--line); cursor: pointer; }
+.signoff li { display: list-item; }
+.checkins { display: grid; gap: 12px; margin-top: 12px; }
+.checkins > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; font-size: 0.95rem; }
+.checkins b { font-family: var(--mono); font-weight: 500; font-size: 12px; color: var(--red-hot); }
+@media (max-width: 560px) { .checkins > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.gsec { margin-top: 48px; }
+.gsec > h3 { font-weight: 900; font-size: 1.9rem; margin-bottom: 14px; }
+.guide-note { color: #4a3634; font-size: 0.95rem; margin: 12px 0 0; }
+.guide-note code { font-family: var(--mono); font-size: 12px; color: var(--fg); }
+.guide-note b { color: var(--fg); font-weight: 600; }
+.src a { color: var(--red-hot); }
+.scroll { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 0.93rem; margin-top: 10px; }
+.tbl th, .tbl td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.tbl th { font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--red-hot); }
+.tbl td:first-child { font-family: var(--mono); font-size: 12px; color: #2a1514; white-space: nowrap; }
+.tbl.wide td:first-child { font-family: var(--body); font-size: 0.93rem; white-space: normal; }
+.tl { list-style: none; padding: 0; margin: 8px 0 0 7px; display: grid; gap: 0; border-left: 2px solid var(--red-deep); }
+.tl li { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 16px; padding: 0 0 22px 22px; position: relative; color: #4a3634; }
+.tl li::before { content: ""; position: absolute; left: -8px; top: 5px; width: 12px; height: 12px; background: var(--red); transform: rotate(45deg); }
+.tl b { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--red-hot); padding-top: 2px; }
+@media (max-width: 560px) { .tl li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.faq { border-bottom: 1px solid var(--line); padding: 14px 0; }
+.faq summary { cursor: pointer; font-weight: 600; }
+.faq summary:hover { color: var(--red-hot); }
+.faq p { margin: 10px 0 0; color: #4a3634; max-width: 70ch; }
+pre.ex { max-height: none; margin-top: 12px; }
+.plan, .plan > div, .out > * { min-width: 0; }
+.plainlist { margin: 0; padding-left: 18px; display: grid; gap: 10px; color: #4a3634; font-size: 0.97rem; max-width: 80ch; }
+.two li b { color: var(--fg); font-weight: 600; }
+.buddy { position: fixed; z-index: 25; width: 124px; height: 132px; right: max(14px, env(safe-area-inset-right, 0px)); bottom: max(14px, env(safe-area-inset-bottom, 0px)); }
+.buddy.l { right: auto; left: max(14px, env(safe-area-inset-left, 0px)); }
+.buddy-btn { display: block; position: relative; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
+.buddy-btn:active { cursor: grabbing; }
+.buddy-btn::before { content: ""; position: absolute; left: 12%; right: 12%; bottom: 3px; height: 14px; border-radius: 50%; background: radial-gradient(ellipse, rgba(225, 6, 0, 0.6), transparent 70%); }
+.buddy-btn canvas { position: relative; width: 100%; height: 100%; display: block; pointer-events: none; }
+.buddy-pop { position: absolute; bottom: calc(100% + 8px); right: 0; width: min(350px, calc(100vw - 32px)); background: #ffffff; border: 1px solid var(--red); box-shadow: 0 0 44px rgba(225, 6, 0, 0.3); }
+.buddy.l .buddy-pop { right: auto; left: 0; }
+.buddy.below .buddy-pop { bottom: auto; top: calc(100% + 8px); }
+.buddy-tip { position: absolute; bottom: 100%; right: 0; margin-bottom: 4px; white-space: nowrap; background: #ffffff; border: 1px solid var(--red); padding: 8px 12px; font-family: var(--mono); font-size: 12px; }
+.buddy.l .buddy-tip { right: auto; left: 0; }
+.buddy.below .buddy-tip { bottom: auto; top: 100%; margin: 4px 0 0; }
+.bp-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.bp-head b { font-family: var(--display); font-weight: 900; font-size: 1.35rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.bp-dots { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+.bp-dots button { width: 9px; height: 9px; transform: rotate(45deg); border: 1px solid var(--red); background: transparent; padding: 0; cursor: pointer; }
+.bp-dots button.on { background: var(--red); }
+.bp-x { font-size: 20px; line-height: 1; color: var(--muted); background: transparent; border: 1px solid var(--line); width: 28px; height: 28px; cursor: pointer; }
+.bp-x:hover { color: var(--fg); border-color: var(--red); }
+.bp-body { padding: 14px; display: grid; gap: 10px; max-height: min(60vh, 460px); overflow: auto; }
+.bp-k { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; color: var(--red-hot); }
+.bp-t { font-family: var(--display); font-weight: 800; font-size: 1.55rem; line-height: 1; text-transform: uppercase; }
+.bp-d { margin: 0; color: #4a3634; font-size: 0.93rem; }
+.bp-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn.sm { padding: 9px 13px; font-size: 11px; }
+.bp-item { display: block; width: 100%; text-align: left; background: rgba(255, 244, 243, 0.85); border: 1px solid var(--line); color: var(--fg); padding: 10px 12px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+.bp-item:hover { border-color: var(--red); background: var(--red-deep); }
+.bp-item span { display: block; color: #6b5553; font-size: 0.82rem; font-weight: 400; margin-top: 2px; }
+.bp-wave { display: none; gap: 3px; align-items: flex-end; height: 16px; }
+.speaking .bp-wave { display: flex; }
+.bp-wave i { width: 3px; height: 100%; background: var(--red-hot); transform-origin: bottom; animation: wave 0.8s ease-in-out infinite; }
+.bp-wave i:nth-child(2) { animation-delay: 0.15s; }
+.bp-wave i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes wave { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+.bp-opts { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.bp-link { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: transparent; border: 0; padding: 6px 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.bp-link:hover { color: var(--red-hot); }
+.bp-link:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+@media (prefers-reduced-motion: reduce) { .bp-wave i { animation: none; } }
+.spot { outline: 2px solid var(--red-hot) !important; outline-offset: 6px; animation: spot 1s ease-in-out 3; }
+@keyframes spot { 50% { box-shadow: 0 0 0 10px rgba(225, 6, 0, 0.3); } }
+@media (max-width: 640px) { .buddy { width: 96px; height: 104px; } }
+.buddy[hidden], .buddy-pop[hidden], .buddy-tip[hidden] { display: none !important; }
+.tour[hidden], .toast[hidden], .nogl[hidden], .tip[hidden] { display: none !important; }
+.tourfab { position: fixed; z-index: 20; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff; background: var(--red); border: 0; padding: 13px 18px; cursor: pointer; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
+.tourfab:hover { background: var(--red-hot); }
+.tourfab i { width: 9px; height: 9px; background: #fff; transform: rotate(45deg); display: inline-block; }
+.toast { position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); bottom: max(24px, env(safe-area-inset-bottom, 0px)); background: #ffffff; border: 1px solid var(--red); padding: 12px 18px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; max-width: calc(100% - 32px); }
+.tour { position: fixed; inset: 0; z-index: 50; background: rgba(255, 255, 255, 0.95); display: flex; align-items: flex-start; justify-content: center; overflow: auto; padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.tour-box { position: relative; margin: auto; width: min(1120px, 100%); display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); background: #ffffff; border: 1px solid var(--red-deep); box-shadow: 0 0 90px rgba(225, 6, 0, 0.2); }
+.tour-x { position: absolute; top: 10px; right: 10px; z-index: 3; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); background: rgba(255, 255, 255, 0.9); border: 1px solid var(--line); padding: 8px 12px; cursor: pointer; }
+.tour-x:hover { color: var(--fg); border-color: var(--red); }
+.tstage { position: relative; min-height: 500px; background: radial-gradient(circle at 30% 60%, rgba(225, 6, 0, 0.22), transparent 62%), #fff5f4; border-right: 1px solid var(--line); overflow: hidden; }
+.tstage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.bubble { position: absolute; left: 16px; top: 16px; z-index: 2; max-width: min(320px, calc(100% - 100px)); min-height: 3.4em; background: #ffffff; border: 1px solid var(--red); padding: 10px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+.bubble::after { content: ""; position: absolute; left: 34px; bottom: -9px; width: 14px; height: 14px; background: #ffffff; border-right: 1px solid var(--red); border-bottom: 1px solid var(--red); transform: rotate(45deg); }
+.nogl { position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: 2; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.tpanel { padding: 38px 28px 24px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.tpanel h2 { font-size: clamp(1.9rem, 3.6vw, 2.7rem); font-weight: 900; }
+.tpanel p { margin: 0; color: #4a3634; font-size: 0.98rem; max-width: 56ch; }
+.tkicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; color: var(--red-hot); }
+.tdots { display: flex; gap: 12px; align-items: center; margin: 4px 0 6px 4px; }
+.tdot { width: 12px; height: 12px; border: 1px solid var(--red); background: transparent; transform: rotate(45deg); padding: 0; cursor: pointer; }
+.tdot.on { background: var(--red); box-shadow: 0 0 12px var(--red); }
+.optgrp { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.optgrp + .optgrp { margin-top: 10px; }
+.optgrp legend { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding: 0 0 8px; }
+.optgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.opt { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; padding: 11px 13px; border: 1px solid var(--line); background: rgba(255, 244, 243, 0.85); cursor: pointer; }
+.opt:hover { border-color: var(--red); }
+.opt.on { border-color: var(--red); background: var(--red-deep); }
+.opt input { accent-color: var(--red); width: 16px; height: 16px; margin-top: 3px; }
+.opt b { display: block; font-weight: 600; font-size: 0.97rem; }
+.opt .d { display: block; color: #6b5553; font-size: 0.85rem; margin-top: 2px; }
+.opt.on .d { color: #2a1514; }
+.sum { margin: 0 0 6px; display: grid; border: 1px solid var(--line); }
+.sum div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+.sum div:last-child { border-bottom: 0; }
+.sum dt { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--red-hot); }
+.sum dd { margin: 0; overflow-wrap: anywhere; }
+.tnav { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 8px; }
+.tnav .btn:disabled { opacity: 0.35; cursor: default; }
+.tnote { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+@media (max-width: 860px) { .tour-box { grid-template-columns: minmax(0, 1fr); } .tstage { min-height: 340px; border-right: 0; border-bottom: 1px solid var(--line); } }
+@media (max-width: 520px) { .optgrid { grid-template-columns: minmax(0, 1fr); } .tpanel { padding: 24px 18px 20px; } .tnote { display: none; } }
+@media (max-width: 980px) { .herorow { grid-template-columns: minmax(0, 1fr); } .grab { display: none; } }
+@media (max-width: 640px) { .nav { display: none; } .frags { display: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .frag { animation: none; } .bar i { transition: none; } }
+</style>
+
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="veil" aria-hidden="true"></div>
+<div class="glow" id="glow" aria-hidden="true"></div>
+<div class="frags" aria-hidden="true">
+  <span class="frag" style="left:5%;top:34%">TODO: ask Priya</span>
+  <span class="frag" style="left:46%;top:12%;animation-delay:-4s">PR #482 · 2 comments open</span>
+  <span class="frag" style="left:74%;top:60%;animation-delay:-8s">#payments · "we decided to…"</span>
+  <span class="frag" style="left:12%;top:80%;animation-delay:-2s">prod key: who has it?</span>
+  <span class="frag" style="left:58%;top:86%;animation-delay:-6s">runbook_v3_FINAL(2).md</span>
+  <span class="frag" style="left:86%;top:30%;animation-delay:-10s">JIRA-2291 · unassigned</span>
+  <span class="frag" style="left:30%;top:52%;animation-delay:-5s">only I know the rollback</span>
+  <span class="frag" style="left:64%;top:40%;animation-delay:-3s">notes_final_v2.txt</span>
+  <span class="frag" style="left:22%;top:18%;animation-delay:-9s">admin role: 1 holder</span>
+  <span class="frag" style="left:90%;top:76%;animation-delay:-7s">tests failing · 19 days</span>
+</div>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><i></i>Handover Engine</div>
+    <nav class="nav" aria-label="Sections">
+      <a href="#tool">Generator</a>
+      <a href="#about">About</a>
+      <a href="#guide">Guide</a>
+      <a href="#method">Method</a>
+    </nav>
+  </header>
+
+  <div class="herorow">
+  <div class="hero">
+    <div class="eyebrow">Handover generator</div>
+    <h1>Activity in. <em>Handover</em> out.</h1>
+    <p class="lede">Paste a leaving teammate's commits, tickets, chat notes and docs. The engine links related entries, finds what is unfinished, undocumented or held by one person, and builds a packet with owners and deadlines.</p>
+    <div class="btns herobtns"><button class="btn solid tour-open" id="tourOpen" type="button">Take the 3D tour</button><a class="btn ghost" href="#tool">Try the generator</a><a class="btn ghost" href="#guide">Read the guide</a><button class="btn ghost" id="flip" type="button">Scatter the cube</button></div>
+  </div>
+  <div class="grab" id="grab" aria-hidden="true"><span class="hint">Drag to spin the packet</span></div>
+  </div>
+
+  <main id="tool" class="app">
+    <aside class="panel input-panel" aria-label="Input">
+      <div class="panel-title">Input</div>
+      <div class="row2">
+        <div class="field"><label class="lbl" for="leaver">Leaving member</label><input type="text" id="leaver" value="Priya Nair" autocomplete="off"></div>
+        <div class="field"><label class="lbl" for="succ">Successor</label><input type="text" id="succ" value="Dev Menon" autocomplete="off"></div>
+      </div>
+      <div class="field"><label class="lbl" for="last">Last working day</label><input type="date" id="last" value="2026-11-14"></div>
+      <div class="field">
+        <label class="lbl" for="raw">Project activity (one entry per line)</label>
+        <textarea id="raw" spellcheck="false" aria-describedby="fmt"></textarea>
+      </div>
+      <label class="check"><input type="checkbox" id="only" checked><span>Only use entries that involve the leaving member</span></label>
+      <div class="btns">
+        <button class="btn solid" id="gen" type="button">Generate handover</button>
+        <button class="btn ghost" id="sample" type="button">Load sample</button>
+        <button class="btn ghost" id="clear" type="button">Clear</button>
+      </div>
+      <div class="field">
+        <label class="lbl" for="file">Or upload a .txt, .log, .csv or .json export</label>
+        <input type="file" id="file" accept=".txt,.log,.csv,.md,.json">
+      </div>
+      <details class="help gh" id="gh">
+        <summary>Import live from GitHub</summary>
+        <div class="field"><label class="lbl" for="ghrepo">Repository (owner/name)</label><input type="text" id="ghrepo" placeholder="owner/repo" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label class="lbl" for="ghuser">Leaver's GitHub username</label><input type="text" id="ghuser" placeholder="username" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label class="lbl" for="ghtok">Token (optional, private repos and higher limits)</label><input type="password" id="ghtok" placeholder="Not stored. Used only for this request." autocomplete="off"></div>
+        <div class="btns"><button class="btn solid sm" id="ghgo" type="button">Import and generate</button></div>
+        <p id="ghmsg" class="ghmsg" role="status"></p>
+        <p>Reads pull requests, issues and commits for that person through the GitHub API, turns them into entries and builds the handover. Public repositories need no token.</p>
+      </details>
+      <details class="help" id="fmt">
+        <summary>Entry format</summary>
+        <p><code>[2026-10-02] PR #482 Dev Menon: 2 review comments open</code></p>
+        <p>Date, source, person and message. The source can be <code>PR #n</code>, <code>commit</code>, <code>JIRA-123</code>, <code>#channel</code>, <code>email</code>, <code>doc</code>, <code>vault</code> or <code>calendar</code>. Entries that share a PR or ticket number are linked into one thread. Free text works too, with less detail.</p>
+      </details>
+    </aside>
+
+    <section class="panel out" id="result" aria-live="polite"></section>
+  </main>
+
+  <section class="info" id="about">
+    <div class="eyebrow">About this website</div>
+    <h2>What <em>Handover Engine</em> is</h2>
+    <p class="lede">A working tool that reads a teammate's scattered project activity and turns it into one handover the next owner can act on. It finds what is unfinished, what only one person knows and what access has to move, then gives every item an owner and a deadline.</p>
+    <div class="two">
+      <div class="panel">
+        <h4>Who it is for</h4>
+        <ul>
+          <li><b>Managers</b> plan the handover, watch the readiness score and see which risks are still open.</li>
+          <li><b>Successors</b> see what lands on them first, who owns each item and when it is due.</li>
+          <li><b>Leaving members</b> capture what only they know, run the handover meeting and sign off.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h4>What you get from one run</h4>
+        <ul>
+          <li>A risk-ranked packet of work, knowledge, access and decisions</li>
+          <li>A 3D graph of who holds what</li>
+          <li>A countdown plan with a calendar of do-by dates</li>
+          <li>A timed meeting agenda and a list of people to introduce</li>
+          <li>A last-day checklist with sign-off, plus Markdown and a short summary to share</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="gsec">
+      <h3>A map of the page</h3>
+      <div class="panel">
+        <div class="scroll"><table class="tbl wide">
+          <thead><tr><th>Area</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Hero and 3D cube</td><td>Shows the idea. Scattered project cards gather into one packet. Drag the cube to spin it, or use the Scatter and Assemble button.</td></tr>
+            <tr><td>Ember, the floating elephant</td><td>Click him for step-by-step help. He points at the right control as you go. Drag him to the left or right side of the screen. He can also start the 3D tour or load an example.</td></tr>
+            <tr><td>The 3D tour</td><td>Ember explains each step in a larger scene. You pick options, then Apply fills in the generator for you.</td></tr>
+            <tr><td>Input panel, on the left</td><td>The leaving member, the successor, the last working day and the activity entries. You can paste, upload a file or load the sample.</td></tr>
+            <tr><td>Result panel, on the right</td><td>The readiness score, counts of open risks, and six tabs that show the same handover in different ways.</td></tr>
+            <tr><td>Guide section</td><td>Reference material: the entry format, what each signal means, how the score is worked out, a timeline and an FAQ.</td></tr>
+            <tr><td>Method section</td><td>The four stages the engine runs: collect, link, rank and package.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="gsec">
+      <h3>The six result tabs</h3>
+      <div class="two">
+        <div class="panel"><h4>Packet</h4><p class="guide-note">Every item grouped as work, knowledge, access or decision, with its owner, do-by date and a trace of the entries behind it. Filter by category, show risks only, tick items as resolved and change owners.</p></div>
+        <div class="panel"><h4>3D graph</h4><p class="guide-note">The leaving member in the middle, items around them and teammates on an outer ring. Larger, pulsing nodes carry more risk. Drag to rotate, hover for details and click to jump to the item.</p></div>
+        <div class="panel"><h4>Plan</h4><p class="guide-note">Days left until the last day, the four items to start with, a calendar of do-by dates, open items per owner and a chart of recent activity.</p></div>
+        <div class="panel"><h4>Meeting</h4><p class="guide-note">A timed agenda with the riskiest items first and questions for each, the people to introduce, and check-ins 7, 30 and 90 days after the last day.</p></div>
+        <div class="panel"><h4>Checklist</h4><p class="guide-note">Last-day tasks such as handing over access, rotating secrets and reassigning work, plus three sign-offs for the meeting, the successor and the leaving member.</p></div>
+        <div class="panel"><h4>Markdown</h4><p class="guide-note">The whole packet as plain text for a doc, ticket or email. Copy summary gives a short message for a team channel.</p></div>
+      </div>
+    </div>
+
+    <div class="gsec">
+      <h3>Under the hood</h3>
+      <div class="panel">
+        <ul class="plainlist">
+          <li>Everything runs in your browser. The entries you paste or upload are not sent anywhere.</li>
+          <li>Plain rules read each line, link entries that share a PR or ticket number, match phrases such as "only I know" or "blocked", and score the risk. The same input always gives the same packet.</li>
+          <li>The 3D scenes use Three.js: the hero cube, the graph and Ember.</li>
+          <li>It cannot see knowledge that was never written down, and it only finds people whose names appear in the entries. The meeting agenda exists to draw out the rest.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="info" id="guide">
+    <div class="eyebrow">Guide</div>
+    <h2>How to run a <em>handover</em></h2>
+    <p class="lede">Use the generator in four steps, then follow the timeline so the packet turns into a real transfer of ownership.</p>
+    <div class="btns herobtns"><button class="btn solid tour-open" type="button">Start the interactive 3D tour</button></div>
+    <div class="pipe">
+      <div class="stage"><div class="n">STEP 1</div><h3>Collect</h3><p>Copy recent activity into the input box, one entry per line. A git log, a ticket export, chat notes and doc changes from the last 60 to 90 days work well. You can also upload a .txt, .csv or .json export.</p></div>
+      <div class="stage"><div class="n">STEP 2</div><h3>Generate</h3><p>Enter the leaving member, the successor and the last working day, then press Generate handover. The packet, graph, plan, meeting agenda and checklist all build from the same entries.</p></div>
+      <div class="stage"><div class="n">STEP 3</div><h3>Review</h3><p>Open an item's trace to see which entries it came from. Change owners, tick items that are already resolved, and use the filters to work through one category at a time.</p></div>
+      <div class="stage"><div class="n">STEP 4</div><h3>Hand over</h3><p>Hold the meeting from the generated agenda, work through the checklist, collect the three sign-offs, then copy the summary or the full Markdown packet to the team.</p></div>
+    </div>
+
+    <div class="gsec">
+      <h3>Entry format</h3>
+      <div class="two">
+        <div class="panel">
+          <h4>One line per entry</h4>
+          <pre class="md ex">[2026-10-02] PR #482 Dev Menon: 2 review comments open, waiting on Priya
+[2026-10-08] #payments Priya: only I know how to roll back the nightly export</pre>
+          <p class="guide-note">Each line holds a date, a source, a person and the message. Entries that mention the same PR or ticket number are merged into one thread. Free text without a date or source still works, with less detail.</p>
+        </div>
+        <div class="panel">
+          <h4>Source keywords</h4>
+          <div class="scroll"><table class="tbl">
+            <thead><tr><th>Line starts with</th><th>Read as</th></tr></thead>
+            <tbody>
+              <tr><td>PR #482</td><td>Pull request</td></tr>
+              <tr><td>commit a3f9c21</td><td>Commit</td></tr>
+              <tr><td>JIRA-2291, ABC-12</td><td>Ticket</td></tr>
+              <tr><td>#payments</td><td>Chat channel</td></tr>
+              <tr><td>email</td><td>Email</td></tr>
+              <tr><td>doc, runbook, wiki</td><td>Document</td></tr>
+              <tr><td>vault, secrets</td><td>Vault</td></tr>
+              <tr><td>calendar</td><td>Calendar event</td></tr>
+            </tbody>
+          </table></div>
+          <p class="guide-note">JSON uploads should be an array of objects with <code>date</code>, <code>source</code>, <code>author</code> and <code>text</code>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="gsec">
+      <h3>What the four signals mean</h3>
+      <div class="two">
+        <div class="panel"><h4>Work in flight</h4><p class="guide-note">Found from words like PR, WIP, blocked, waiting, failing, unassigned and due. It is flagged <b>At risk</b> when it is blocked, quiet for 14 days or more, or due before the last day. It is flagged <b>No owner</b> when it says unassigned or nobody else has touched it.</p></div>
+        <div class="panel"><h4>Knowledge only they hold</h4><p class="guide-note">Found from phrases like only I know, nothing written down, outdated, manual workaround, in my DMs, who owns and ask followed by a name. The fix is a recorded walkthrough and a runbook entry.</p></div>
+        <div class="panel"><h4>Access to transfer</h4><p class="guide-note">Found from passwords, tokens, keys, vault, admin roles and service accounts. It is marked <b>Single holder</b> when only one account has it. Do not paste secret values. Write where a secret lives, not what it is.</p></div>
+        <div class="panel"><h4>Decisions to preserve</h4><p class="guide-note">Found from decided, agreed, going with, instead of and keeping. A decision stays marked <b>Log it</b> until an entry mentions a written decision record.</p></div>
+      </div>
+    </div>
+
+    <div class="gsec">
+      <h3>How the readiness score works</h3>
+      <div class="panel">
+        <p class="guide-note" style="margin-top:0">Readiness starts at 100 and loses points for each open item. It never drops below 5. Under 40 means critical gaps, 40 to 69 means needs work, and 70 or more means ready to hand over. Resolving an item removes its points. Giving an unowned work item an owner lowers its points from 9 to 3.</p>
+        <div class="scroll"><table class="tbl wide">
+          <thead><tr><th>Open item</th><th>Points lost</th></tr></thead>
+          <tbody>
+            <tr><td>Work with no owner and unassigned</td><td>9</td></tr>
+            <tr><td>Work at risk</td><td>6</td></tr>
+            <tr><td>Undocumented knowledge</td><td>5</td></tr>
+            <tr><td>Access held by one account, or to transfer</td><td>5</td></tr>
+            <tr><td>Work with no owner but a proposed owner</td><td>3</td></tr>
+            <tr><td>Decision that needs a record</td><td>2</td></tr>
+            <tr><td>Work on track</td><td>1</td></tr>
+            <tr><td>Decision already recorded, or any resolved item</td><td>0</td></tr>
+          </tbody>
+        </table></div>
+        <p class="guide-note">Solo-held counts open items where nobody except the leaving member appears in the entries. These are the items most likely to disappear with them.</p>
+      </div>
+    </div>
+
+    <div class="gsec">
+      <h3>Timeline</h3>
+      <ul class="tl">
+        <li><b>30 days before</b><span>Run the generator and share the packet with the manager. Assign an owner to every item marked No owner.</span></li>
+        <li><b>14 days before</b><span>Hold the handover meeting from the generated agenda. Start recording walkthroughs for knowledge items.</span></li>
+        <li><b>7 days before</b><span>The successor works through the first items. Decisions are written up. The tool sets decision do-by dates here.</span></li>
+        <li><b>Last day</b><span>Revoke access, rotate shared secrets, forward email and collect the three sign-offs. Access items are due 2 days before, work 3 days before and knowledge 5 days before.</span></li>
+        <li><b>7, 30 and 90 days after</b><span>Check what the successor still had to ask, re-run the generator on their activity, and fix out-of-date runbooks.</span></li>
+      </ul>
+    </div>
+
+    <div class="gsec">
+      <h3>Reading the 3D graph</h3>
+      <div class="panel"><p class="guide-note" style="margin-top:0">The leaving member sits in the middle. Each handover item is a node around them, coloured by type. Bigger, pulsing nodes carry more risk. Teammates sit on the outer ring with a count of the open items they own, and lines run from each item to its owner. A ring with one person holding most lines is a single point of failure. Drag to rotate, hover for the item, click to open it in the packet.</p></div>
+    </div>
+
+    <div class="gsec">
+      <h3>How this compares with common handover guidance</h3>
+      <div class="panel">
+        <div class="scroll"><table class="tbl wide">
+          <thead><tr><th>Handover guidance recommends</th><th>Where it lives here</th></tr></thead>
+          <tbody>
+            <tr><td>Open tasks with status and blockers</td><td>Packet, work in flight, with At risk and No owner flags</td></tr>
+            <tr><td>Access, credentials and verified removal</td><td>Packet, access to transfer, and the Checklist tab</td></tr>
+            <tr><td>Key contacts, internal and external</td><td>Meeting tab, people to introduce</td></tr>
+            <tr><td>Process knowledge and how-to guides</td><td>Knowledge items, with walkthrough questions in the meeting agenda</td></tr>
+            <tr><td>Known risks and roadblocks</td><td>Risk pills, the 3D graph and the readiness score</td></tr>
+            <tr><td>A handover meeting with stakeholders</td><td>Meeting tab, timed agenda</td></tr>
+            <tr><td>Reviews after the handover</td><td>Check-ins at 7, 30 and 90 days</td></tr>
+            <tr><td>Attestation and sign-off</td><td>Checklist tab, three sign-offs</td></tr>
+            <tr><td>Revoking accounts in IT systems, exit interviews, HR analytics</td><td>Not covered. HR and IT offboarding tools such as Personio, Okta and JumpCloud handle these. This tool lists what has to be revoked.</td></tr>
+          </tbody>
+        </table></div>
+        <p class="guide-note src">Based on handover guidance from <a href="https://scribe.com/library/handover-document-template" target="_blank" rel="noopener">Scribe</a>, <a href="https://whatfix.com/blog/handover-documentation/" target="_blank" rel="noopener">Whatfix</a> and <a href="https://www.mangoapps.com/templates/forms/pre-leave-transition-and-handover-plan" target="_blank" rel="noopener">MangoApps</a>, and on the offboarding tools reviewed by <a href="https://www.personio.com/hr-lexicon/offboarding-software/" target="_blank" rel="noopener">Personio</a>.</p>
+      </div>
+    </div>
+
+    <div class="gsec">
+      <h3>Questions</h3>
+      <details class="faq"><summary>Does my data leave the browser?</summary><p>No. The analysis runs on this page and nothing you paste or upload is sent anywhere. Leave out passwords and key values anyway. The packet only needs to say where a secret lives.</p></details>
+      <details class="faq"><summary>How accurate is it?</summary><p>It uses fixed rules, not an AI model, so the same input always gives the same packet. Every item has a trace of its source entries. Treat the packet as a draft to confirm in the handover meeting.</p></details>
+      <details class="faq"><summary>What does it miss?</summary><p>Anything that was never written down. That is what the meeting agenda is for: each knowledge and access item comes with questions that bring the missing detail out of the leaving member's head.</p></details>
+      <details class="faq"><summary>Can I use it for more than one person?</summary><p>Run it once per leaving member. Change the name and the last day, keep the entries, and the packet is rebuilt for that person.</p></details>
+      <details class="faq"><summary>What is on the roadmap?</summary><p>Connectors that pull the same entries straight from GitHub, Jira and Slack, and an export that creates the checklist as tickets.</p></details>
+    </div>
+  </section>
+
+  <section class="info" id="method">
+    <div class="eyebrow">Method</div>
+    <h2>How the packet is <em>built</em></h2>
+    <div class="pipe">
+      <div class="stage"><div class="n">STAGE 1</div><h3>Collect</h3><p>Reads each entry and pulls out its date, source, person, references and any dates mentioned in the text.</p></div>
+      <div class="stage"><div class="n">STAGE 2</div><h3>Link</h3><p>Entries that share a PR or ticket number are merged into one thread, so a ticket, its PR and the review chat read as one story.</p></div>
+      <div class="stage"><div class="n">STAGE 3</div><h3>Rank</h3><p>Each thread is classified as work, decision, knowledge or access, then rated by risk: no owner, stalled, blocked, undocumented or single holder.</p></div>
+      <div class="stage"><div class="n">STAGE 4</div><h3>Package</h3><p>Produces owners, do-by dates, next steps and a readiness score that rises as items are resolved. Export it as Markdown.</p></div>
+    </div>
+    <div class="two">
+      <div class="panel">
+        <h4>Signals it detects</h4>
+        <ul>
+          <li>Work with no owner, no recent activity, open review comments or a due date before the last day</li>
+          <li>Knowledge that lives in DMs, personal notes or one person's head</li>
+          <li>Credentials, admin roles and keys held by a single account or a personal vault</li>
+          <li>Decisions made in chat that have no written record</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h4>Runs in your browser</h4>
+        <ul>
+          <li>Analysis is rule-based and runs locally on the page. Pasted activity is not uploaded anywhere.</li>
+          <li>Every item keeps a trace of the entries it came from, so each claim can be checked.</li>
+          <li>Next step: connectors that pull the same activity directly from GitHub, Jira and Slack.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>Handover Engine. Sample data is invented for illustration.</footer>
+</div>
+
+<div class="tour" id="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden>
+  <div class="tour-box">
+    <button class="tour-x" id="tourClose" type="button">Skip tour</button>
+    <div class="tstage" id="tstage">
+      <canvas id="tcanvas" aria-hidden="true"></canvas>
+      <div class="bubble" id="bubble" aria-hidden="true"></div>
+      <div class="nogl" id="nogl" hidden>The 3D view needs WebGL. The steps and options still work.</div>
+    </div>
+    <div class="tpanel">
+      <div class="tdots" id="tdots"></div>
+      <div class="tkicker" id="tkicker"></div>
+      <h2 id="tourTitle"></h2>
+      <p id="tbody"></p>
+      <div id="topts"></div>
+      <div class="tnav">
+        <button class="btn ghost" id="tback" type="button">Back</button>
+        <button class="bp-link js-voice" id="tvoice" data-b="voice" type="button">Voice: on</button>
+        <button class="btn solid" id="tnext" type="button">Next</button>
+      </div>
+      <div class="tnote">Nothing changes until you apply. Use Skip tour at any time.</div>
+    </div>
+  </div>
+</div>
+<div class="buddy" id="buddy">
+  <div class="buddy-pop" id="bpop" role="dialog" aria-label="Ember, your guide" hidden>
+    <div class="bp-head"><b>Ember</b><span class="bp-wave" aria-hidden="true"><i></i><i></i><i></i></span><div class="bp-dots" id="bdots"></div><button class="bp-x" id="bclose" type="button" aria-label="Close guide">&times;</button></div>
+    <div class="bp-body" id="bbody"></div>
+  </div>
+  <div class="buddy-tip" id="btip" hidden>Need a hand? Click me.</div>
+  <button class="buddy-btn" id="bbtn" type="button" aria-label="Open Ember, the guide. Drag to move him to the other side."><canvas id="bcanvas" aria-hidden="true"></canvas></button>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ---------- 3D scene: scattered fragments converge into a handover packet ---------- */
+(function () {
+  window.handoverScene = { set: function () {}, nudge: function () {}, goal: function () { return 0; } };
+  if (!window.THREE) return;
+  var canvas = document.getElementById("bg");
+  var renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true }); } catch (err) { return; }
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
+  camera.position.set(0, 0, 10);
+  var group = new THREE.Group();
+  scene.add(group);
+
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  var cardGeo = new THREE.BoxGeometry(0.36, 0.25, 0.05);
+  var edgeGeo = new THREE.EdgesGeometry(cardGeo);
+  var nodes = [], N = 125;
+  for (var i = 0; i < N; i++) {
+    var hot = Math.random() < 0.22;
+    var mesh = new THREE.Mesh(cardGeo, new THREE.MeshBasicMaterial({ color: hot ? 0xe10600 : 0xfff1ef, transparent: true, opacity: hot ? 0.9 : 0.82 }));
+    mesh.add(new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: hot ? 0xff5a4d : 0x9c1a1a })));
+    group.add(mesh);
+    var ix = i % 5, iy = Math.floor(i / 5) % 5, iz = Math.floor(i / 25);
+    nodes.push({
+      m: mesh,
+      cx: rnd(-9, 9), cy: rnd(-5.5, 5.5), cz: rnd(-6, 4),
+      tx: (ix - 2) * 0.66, ty: (iy - 2) * 0.66, tz: (iz - 2) * 0.66,
+      ph: rnd(0, 6.28), sp: rnd(0.2, 0.7), rx: rnd(0, 6.28), ry: rnd(0, 6.28), rz: rnd(0, 6.28)
+    });
+  }
+  var coreMat = new THREE.LineBasicMaterial({ color: 0xff3b2f, transparent: true, opacity: 0 });
+  group.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(3.9, 3.9, 3.9)), coreMat));
+  var core2Mat = new THREE.LineBasicMaterial({ color: 0xe10600, transparent: true, opacity: 0 });
+  group.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.OctahedronGeometry(2.9)), core2Mat));
+
+  var PAIRS = 70, pairIdx = [];
+  for (var k = 0; k < PAIRS; k++) pairIdx.push([Math.floor(Math.random() * N), Math.floor(Math.random() * N)]);
+  var tPos = new Float32Array(PAIRS * 6);
+  var tGeo = new THREE.BufferGeometry();
+  tGeo.setAttribute("position", new THREE.BufferAttribute(tPos, 3));
+  var tMat = new THREE.LineBasicMaterial({ color: 0xe10600, transparent: true, opacity: 0.35 });
+  var threads = new THREE.LineSegments(tGeo, tMat);
+  threads.frustumCulled = false;
+  group.add(threads);
+
+  /* data streams: particles spiral in from the edges toward the packet */
+  var PN = 520, pPos = new Float32Array(PN * 3), pDir = [], pGeo = new THREE.BufferGeometry();
+  for (var q = 0; q < PN; q++) {
+    var th = rnd(0, 6.283), ph2 = Math.acos(rnd(-1, 1));
+    pDir.push({ x: Math.sin(ph2) * Math.cos(th), y: Math.cos(ph2), z: Math.sin(ph2) * Math.sin(th), r0: rnd(6, 13), sp: rnd(0.04, 0.12), off: Math.random(), sw: rnd(-1.2, 1.2) });
+  }
+  pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
+  var pMat = new THREE.PointsMaterial({ color: 0xff3b2f, size: 0.07, transparent: true, opacity: 0.5, depthWrite: false });
+  var pts = new THREE.Points(pGeo, pMat);
+  pts.frustumCulled = false;
+  group.add(pts);
+  var yaw = 0, vyaw = 0;
+
+  var mx = 0, my = 0, cur = 0, goal = 0;
+  window.addEventListener("pointermove", function (e) {
+    mx = (e.clientX / window.innerWidth - 0.5) * 2;
+    my = (e.clientY / window.innerHeight - 0.5) * 2;
+  });
+  function size() {
+    var w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", function () { size(); if (reduce) draw(0); });
+  size();
+
+  function draw(t) {
+    var e = cur * cur * (3 - 2 * cur), f = 1 - e;
+    var wide = window.innerWidth > 900;
+    group.position.x = wide ? 3.1 : 0;
+    var sy = Math.min(1, (window.scrollY || 0) / 700);
+    group.position.y = (wide ? 0.6 : 2.2) + sy * 1.2;
+    canvas.style.opacity = String(1 - 0.5 * sy);
+    var sc = window.innerWidth < 640 ? 0.7 : 1;
+    sc *= 1 + 0.03 * Math.sin(t * 2) * e;
+    group.scale.set(sc, sc, sc);
+    for (var i = 0; i < N; i++) {
+      var n = nodes[i], m = n.m;
+      var dx = Math.sin(t * n.sp + n.ph) * 0.8 * f, dy = Math.cos(t * n.sp * 0.8 + n.ph) * 0.6 * f;
+      m.position.set((n.cx + dx) * f + n.tx * e, (n.cy + dy) * f + n.ty * e, n.cz * f + n.tz * e);
+      m.rotation.set((n.rx + t * n.sp * 0.5) * f, (n.ry + t * n.sp * 0.4) * f, n.rz * f);
+    }
+    for (var j = 0; j < PAIRS; j++) {
+      var a = nodes[pairIdx[j][0]].m.position, b = nodes[pairIdx[j][1]].m.position;
+      tPos[j * 6] = a.x; tPos[j * 6 + 1] = a.y; tPos[j * 6 + 2] = a.z;
+      tPos[j * 6 + 3] = b.x; tPos[j * 6 + 4] = b.y; tPos[j * 6 + 5] = b.z;
+    }
+    tGeo.attributes.position.needsUpdate = true;
+    tMat.opacity = 0.34 * f + 0.05;
+    coreMat.opacity = e * e;
+    core2Mat.opacity = e * e * 0.7;
+    for (var q2 = 0; q2 < PN; q2++) {
+      var d = pDir[q2], u = (t * d.sp + d.off) % 1;
+      var rad = 2.2 + (d.r0 - 2.2) * (1 - u);
+      var a = d.sw * u, ca = Math.cos(a), sa = Math.sin(a);
+      pPos[q2 * 3] = (d.x * ca - d.z * sa) * rad;
+      pPos[q2 * 3 + 1] = d.y * rad;
+      pPos[q2 * 3 + 2] = (d.x * sa + d.z * ca) * rad;
+    }
+    pGeo.attributes.position.needsUpdate = true;
+    pMat.opacity = 0.25 + 0.4 * e;
+    yaw += vyaw; vyaw *= 0.94;
+    group.rotation.y = t * 0.16 + mx * 0.25 + yaw;
+    group.rotation.x = my * 0.12 + e * 0.2;
+    camera.position.x += (mx * 0.5 - camera.position.x) * 0.04;
+    camera.position.y += (-my * 0.35 - camera.position.y) * 0.04;
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  }
+  window.handoverScene.set = function (v) {
+    goal = v;
+    document.body.classList.toggle("assembled", v > 0.5);
+    if (reduce) { cur = goal; draw(0); }
+  };
+  window.handoverScene.goal = function () { return goal; };
+  window.handoverScene.nudge = function (dx) {
+    vyaw = dx * 0.004; yaw += dx * 0.005;
+    if (reduce) draw(0);
+  };
+  if (reduce) { draw(0); return; }
+  function loop(ms) {
+    cur += (goal - cur) * 0.035;
+    draw(ms / 1000);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+
+/* ---------- Ember: original 3D elephant guide used by the tour ---------- */
+(function () {
+  var noop = function () {};
+  var api = { ok: false, init: noop, resize: noop, start: noop, stop: noop, setStep: noop, config: noop, talk: noop };
+  window.TourStage = api;
+  if (!window.THREE) return;
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var renderer, scene, camera, canvas, holder, EE, E, headG, earL, earR, eyeL, eyeR, tailP, props, lines, linePos;
+  var trunkSeg = [], cards = [];
+  var W = 600, H = 440, loopId = 0, running = false, step = 0, bump = 0, talking = false, lift = 0, wide = true;
+  var mx = 0, my = 0, blinkT = 0, nextBlink = 2.5;
+  var NC = 30, NL = 40, RED = 0xe10600;
+  var cfg = { colors: [0xff3b2f, 0xff9d90, 0x3a2a2a, 0xb3170f, 0x6b4a4c, 0x8c6a68], scope: 1, focus: 0, days: 14 };
+
+  function rnd(i, k) { var x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); }
+  function mat(color) { return new THREE.MeshStandardMaterial({ color: color, roughness: 0.78, metalness: 0.04, flatShading: true }); }
+  function sph(r, color, sx, sy, sz) {
+    var m = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 14), mat(color));
+    m.scale.set(sx, sy, sz);
+    return m;
+  }
+
+  function build() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    var key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(3, 5, 6); scene.add(key);
+    var rim = new THREE.PointLight(0xff2a1a, 1.4, 16); rim.position.set(-4, 2, 3); scene.add(rim);
+    var low = new THREE.PointLight(0xe10600, 1.0, 12); low.position.set(2, -2, 4); scene.add(low);
+
+    EE = new THREE.Group(); scene.add(EE);
+    E = new THREE.Group(); EE.add(E);
+    var ring = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.025, 8, 64), new THREE.MeshBasicMaterial({ color: RED }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = -1.32; EE.add(ring);
+    var disc = new THREE.Mesh(new THREE.CircleGeometry(1.9, 48), new THREE.MeshBasicMaterial({ color: 0xffe3e0, transparent: true, opacity: 0.8 }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = -1.33; EE.add(disc);
+
+    var BODY = 0x4d3f41, SKIN = 0x5e4e50;
+    E.add(sph(1.0, BODY, 1.1, 1.0, 1.0));
+    [-1, 1].forEach(function (sx) {
+      [-1, 1].forEach(function (sz) {
+        var leg = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.8, 12), mat(BODY));
+        leg.position.set(sx * 0.58, -0.78, sz * 0.45); E.add(leg);
+        var foot = sph(0.34, SKIN, 1, 0.45, 1.15);
+        foot.position.set(sx * 0.58, -1.16, sz * 0.45 + 0.04); E.add(foot);
+      });
+    });
+    tailP = new THREE.Group(); tailP.position.set(0, 0.2, -1.0); E.add(tailP);
+    var tail = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.07, 0.6, 8), mat(BODY));
+    tail.position.set(0, -0.3, -0.05); tailP.add(tail);
+    var tip = sph(0.1, RED, 1, 1.4, 1); tip.position.set(0, -0.66, -0.05); tailP.add(tip);
+
+    var scarf = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.14, 10, 28), mat(RED));
+    scarf.rotation.x = Math.PI / 2; scarf.position.set(0, 0.66, 0.3); E.add(scarf);
+    var knot = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.62, 0.1), mat(RED));
+    knot.position.set(0.32, 0.38, 1.04); knot.rotation.z = 0.2; E.add(knot);
+
+    headG = new THREE.Group(); headG.position.set(0, 1.25, 0.5); E.add(headG);
+    headG.add(sph(0.9, SKIN, 1, 0.96, 0.96));
+    function ear(s) {
+      var p = new THREE.Group(); p.position.set(s * 0.72, 0.2, -0.2);
+      var e1 = sph(0.62, BODY, 1, 1.05, 0.13); e1.position.set(s * 0.5, -0.05, 0); p.add(e1);
+      var e2 = sph(0.44, RED, 0.85, 0.9, 0.11); e2.position.set(s * 0.5, -0.05, 0.075); p.add(e2);
+      headG.add(p);
+      return p;
+    }
+    earL = ear(-1); earR = ear(1);
+    function eye(s) {
+      var g = new THREE.Group(); g.position.set(s * 0.34, 0.16, 0.77);
+      g.add(sph(0.17, 0xffffff, 1, 1, 1));
+      var p = sph(0.095, 0x0b0304, 1, 1, 1); p.position.set(0, 0, 0.12); g.add(p);
+      var h = sph(0.035, 0xffffff, 1, 1, 1); h.position.set(0.03, 0.035, 0.08); p.add(h);
+      var ch = sph(0.11, 0x8a2a2a, 1, 0.7, 0.45); ch.position.set(s * 0.21, -0.28, -0.1); g.add(ch);
+      headG.add(g);
+      return { g: g, p: p };
+    }
+    eyeL = eye(-1); eyeR = eye(1);
+    for (var i = 0; i < 8; i++) {
+      var seg = sph(0.27 - i * 0.02, SKIN, 1, 1, 1);
+      headG.add(seg); trunkSeg.push(seg);
+    }
+
+    props = new THREE.Group(); scene.add(props);
+    var cg = new THREE.BoxGeometry(0.46, 0.32, 0.05), eg = new THREE.EdgesGeometry(cg);
+    for (var j = 0; j < NC; j++) {
+      var m = new THREE.Mesh(cg, new THREE.MeshStandardMaterial({ color: 0xf6c9c4, emissive: RED, emissiveIntensity: 0, roughness: 0.6, metalness: 0.1, transparent: true, opacity: 1 }));
+      var el = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0xff5a4d, transparent: true, opacity: 0.8 }));
+      m.add(el); props.add(m); m.scale.setScalar(0.001);
+      cards.push({ m: m, line: el, r1: rnd(j, 1), r2: rnd(j, 2), r3: rnd(j, 3), s: 0.001, em: 0, op: 1,
+        tcol: new THREE.Color(0xf6c9c4), tgt: new THREE.Vector3(), tr: new THREE.Vector3(), ts: 0, to: 1, tem: 0 });
+    }
+    linePos = new Float32Array(NL * 6);
+    var lg = new THREE.BufferGeometry();
+    lg.setAttribute("position", new THREE.BufferAttribute(linePos, 3));
+    lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xff3b2f, transparent: true, opacity: 0.7 }));
+    lines.frustumCulled = false;
+    props.add(lines);
+  }
+
+  function place() {
+    wide = W / H > 0.85;
+    if (wide) {
+      EE.position.set(-2.15, -0.7, 0); EE.scale.setScalar(1);
+      props.position.set(2.4, 0.3, 0); props.scale.setScalar(1);
+      camera.position.set(0, 1.0, 9.6); camera.lookAt(0.2, 0.2, 0);
+    } else {
+      EE.position.set(-0.9, -1.55, 0); EE.scale.setScalar(0.55);
+      props.position.set(0.7, 1.2, 0); props.scale.setScalar(0.72);
+      camera.position.set(0, 0.6, 9.6); camera.lookAt(0, 0.2, 0);
+    }
+  }
+
+  function visCount() { return Math.min(NC, Math.max(6, cfg.colors.length * 4)); }
+
+  function layout(t) {
+    var n = cfg.colors.length, i, c, a, vis, x, y, z;
+    for (i = 0; i < NC; i++) {
+      c = cards[i]; c.ts = 0; c.to = 1; c.tem = 0; c.tcol.setHex(0xf6c9c4); c.tr.set(0, 0, 0); c.tgt.set(0, 0, 0);
+    }
+    if (step === 0) {
+      for (i = 0; i < 12; i++) {
+        c = cards[i]; a = (i / 12) * 6.2832 + t * 0.5;
+        c.tgt.set(Math.cos(a) * 1.5, Math.sin(i * 1.7 + t) * 0.3, Math.sin(a) * 1.5);
+        c.tr.set(0, -a, 0); c.ts = 1; c.tcol.setHex(cfg.colors[i % n]); c.tem = 0.15;
+      }
+    } else if (step === 1) {
+      vis = visCount();
+      for (i = 0; i < vis; i++) {
+        c = cards[i];
+        x = (c.r1 - 0.5) * 3.4 + Math.sin(t * 0.6 + c.r3 * 6) * 0.3;
+        y = (c.r2 - 0.5) * 2.8 + Math.cos(t * 0.5 + c.r1 * 6) * 0.25;
+        z = (c.r3 - 0.5) * 2;
+        c.tgt.set(x, y, z);
+        c.tr.set(t * 0.3 * (c.r1 - 0.5) + c.r2 * 3, t * 0.4 * (c.r3 - 0.5) + c.r1 * 3, c.r3 * 2);
+        c.ts = 1; c.tcol.setHex(cfg.colors[i % n]); c.tem = 0.12;
+      }
+    } else if (step === 2) {
+      vis = visCount();
+      var g = Math.max(2, Math.min(5, Math.ceil(vis / 5)));
+      for (i = 0; i < vis; i++) {
+        c = cards[i];
+        var k = i % g, slot = Math.floor(i / g), ca = (k / g) * 6.2832 + 0.4, la = slot * 1.3 + t * 0.4;
+        if (cfg.scope && i % 5 === 4) {
+          c.tgt.set((c.r1 > 0.5 ? 1 : -1) * 2.1, (c.r2 - 0.5) * 2.6, -0.8 + c.r3);
+          c.ts = 0.55; c.to = 0.18; c.tcol.setHex(0xefb0aa); c.tem = 0;
+        } else {
+          c.tgt.set(Math.cos(ca) * 1.15 + Math.cos(la) * 0.42, Math.sin(ca) * 0.95 + Math.sin(la) * 0.34, Math.sin(slot * 2.1) * 0.25);
+          c.tr.set(0, 0, Math.sin(la) * 0.3);
+          c.ts = 1; c.tcol.setHex(cfg.colors[i % n]); c.tem = 0.3;
+        }
+      }
+    } else if (step === 3) {
+      vis = Math.min(10, Math.max(6, n * 2));
+      for (i = 0; i < vis; i++) {
+        c = cards[i];
+        var hot = i < 3;
+        c.tgt.set(Math.sin(i * 0.5) * 0.12, 1.45 - i * (2.9 / (vis - 1)), 0);
+        c.ts = hot ? 1.25 - i * 0.08 : 0.9;
+        c.tcol.setHex(hot ? RED : 0xefb0aa);
+        c.tem = hot ? 0.9 + 0.4 * Math.sin(t * 4 + i) : 0.05;
+        c.to = (cfg.focus && i >= 4) ? 0.15 : 1;
+      }
+    } else if (step === 4) {
+      var d = Math.max(2, cfg.days), lit = Math.floor((t * 5) % (d + 8));
+      var sc = Math.min(1, 0.8 * (4.0 / (d - 1)) / 0.32);
+      for (i = 0; i < d && i < NC; i++) {
+        c = cards[i];
+        c.tgt.set(-2.0 + i * 4.0 / (d - 1), -0.2 + Math.sin(i * 0.5 + t * 1.5) * 0.12, 0);
+        c.tr.set(0, 0, Math.PI / 2);
+        c.ts = sc; c.tem = 0.05; c.tcol.setHex(0xefb0aa);
+        if (i <= lit) { c.tcol.setHex(RED); c.tem = 0.8; }
+        if (i === d - 1 || i === Math.min(d, NC) - 1) { c.tcol.setHex(0x8a0a05); c.ts = sc * 1.4; c.tem = 0.6; }
+      }
+    } else {
+      a = t * 0.7;
+      for (i = 0; i < 27; i++) {
+        c = cards[i];
+        var ix = (i % 3) - 1, iy = (Math.floor(i / 3) % 3) - 1, iz = Math.floor(i / 9) - 1;
+        x = ix * 0.5; z = iz * 0.5;
+        c.tgt.set(x * Math.cos(a) + z * Math.sin(a), iy * 0.5 + Math.sin(t) * 0.05, -x * Math.sin(a) + z * Math.cos(a));
+        c.tr.set(0, a, 0); c.ts = 0.8;
+        c.tcol.setHex(i % 4 === 0 ? RED : 0xf6c9c4); c.tem = i % 4 === 0 ? 0.7 : 0.1;
+      }
+    }
+  }
+
+  function stepCards(dt) {
+    var k = reduce ? 1 : Math.min(1, dt * 5), i, c;
+    for (i = 0; i < NC; i++) {
+      c = cards[i];
+      c.m.position.lerp(c.tgt, k);
+      c.m.rotation.x += (c.tr.x - c.m.rotation.x) * k;
+      c.m.rotation.y += (c.tr.y - c.m.rotation.y) * k;
+      c.m.rotation.z += (c.tr.z - c.m.rotation.z) * k;
+      c.s += (c.ts - c.s) * k;
+      c.m.scale.setScalar(Math.max(0.001, c.s));
+      c.m.material.color.lerp(c.tcol, k);
+      c.em += (c.tem - c.em) * k;
+      c.m.material.emissiveIntensity = c.em;
+      c.op += (c.to - c.op) * k;
+      c.m.material.opacity = c.op;
+      c.line.material.opacity = 0.8 * c.op;
+    }
+  }
+
+  function updateLines() {
+    var j = 0, i, last = [];
+    linePos.fill(0);
+    if (step === 2) {
+      var vis = visCount(), g = Math.max(2, Math.min(5, Math.ceil(vis / 5)));
+      for (i = 0; i < vis; i++) {
+        if (cfg.scope && i % 5 === 4) continue;
+        var k = i % g;
+        if (last[k] !== undefined && j < NL) {
+          var a = cards[last[k]].m.position, b = cards[i].m.position;
+          linePos[j * 6] = a.x; linePos[j * 6 + 1] = a.y; linePos[j * 6 + 2] = a.z;
+          linePos[j * 6 + 3] = b.x; linePos[j * 6 + 4] = b.y; linePos[j * 6 + 5] = b.z;
+          j++;
+        }
+        last[k] = i;
+      }
+    }
+    lines.geometry.attributes.position.needsUpdate = true;
+  }
+
+  function trunk(t) {
+    var a = 0, y = -0.2, z = 0.8;
+    for (var i = 0; i < trunkSeg.length; i++) {
+      var w = Math.sin(t * 2.2 - i * 0.6) * (0.05 + i * 0.012) * (1 + lift);
+      a += -0.22 + lift * 0.4 + w;
+      y += Math.sin(a) * 0.19; z += Math.cos(a) * 0.19;
+      trunkSeg[i].position.set(0, y, z);
+    }
+  }
+
+  function updateEle(t, dt) {
+    bump = Math.max(0, bump - dt * 1.3);
+    E.position.y = Math.sin(t * 1.6) * 0.06 + Math.sin(bump * Math.PI) * 0.35;
+    var turn = (step === 0 ? 0.15 : 0.5) * (wide ? 1 : 0.3);
+    headG.rotation.y += (turn + mx * 0.35 - headG.rotation.y) * 0.08;
+    var nod = Math.sin(bump * Math.PI) * 0.25 + (talking ? Math.sin(t * 16) * 0.05 : 0);
+    headG.rotation.x += (my * 0.18 + nod - headG.rotation.x) * 0.2;
+    lift += ((step === 0 ? 1 : (talking ? 0.35 : 0.15)) - lift) * 0.04;
+    var fl = Math.sin(t * 2.4) * 0.1 + Math.sin(t * 14) * 0.2 * bump + (talking ? Math.sin(t * 9) * 0.05 : 0);
+    earL.rotation.y = -(0.28 + fl); earR.rotation.y = 0.28 + fl;
+    tailP.rotation.z = Math.sin(t * 3) * 0.35;
+    if (t > nextBlink) { blinkT = 0.14; nextBlink = t + 2.5 + Math.abs(Math.sin(t * 7)) * 2.5; }
+    blinkT -= dt;
+    var sy = blinkT > 0 ? 0.12 : 1;
+    eyeL.g.scale.y = sy; eyeR.g.scale.y = sy;
+    eyeL.p.position.x = mx * 0.04; eyeR.p.position.x = mx * 0.04;
+    eyeL.p.position.y = -my * 0.035; eyeR.p.position.y = -my * 0.035;
+    trunk(t);
+  }
+
+  function frame(t, dt) {
+    layout(t); stepCards(dt); updateLines(); updateEle(t, dt);
+    renderer.render(scene, camera);
+  }
+
+  api.init = function (cv) {
+    canvas = cv; holder = cv.parentNode;
+    try { renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }); } catch (err) { return; }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    build();
+    api.ok = true;
+    window.addEventListener("pointermove", function (e) {
+      var r = canvas.getBoundingClientRect();
+      mx = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width * 0.3)) / (r.width * 0.5)));
+      my = Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height * 0.4)) / (r.height * 0.5)));
+    });
+    window.addEventListener("resize", function () { if (running) api.resize(); });
+    api.resize();
+  };
+  api.resize = function () {
+    if (!renderer || !holder) return;
+    W = Math.max(280, holder.clientWidth); H = Math.max(260, holder.clientHeight);
+    renderer.setSize(W, H, false);
+    camera.aspect = W / H; camera.updateProjectionMatrix();
+    place();
+  };
+  api.start = function () {
+    if (!renderer) return;
+    var id = ++loopId, last = performance.now();
+    running = true;
+    (function tick(ms) {
+      if (!running || id !== loopId) return;
+      if (!canvas.isConnected) { running = false; return; }
+      requestAnimationFrame(tick);
+      var dt = Math.min(0.05, (ms - last) / 1000) || 0.016;
+      last = ms;
+      frame(reduce ? 0 : ms / 1000, dt);
+    })(last);
+  };
+  api.stop = function () { running = false; loopId++; };
+  api.setStep = function (i) { step = i; bump = 1; };
+  api.config = function (o) { for (var k in o) cfg[k] = o[k]; };
+  api.talk = function (b) { talking = !!b; };
+})();
+
+/* ---------- Ember as a floating helper: small 3D elephant that waves, follows the cursor and hops when clicked ---------- */
+(function () {
+  var api = { ok: false, init: function () {}, setOpen: function () {}, hop: function () {}, talk: function () {} };
+  window.MiniEmber = api;
+  if (!window.THREE) return;
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var renderer, scene, camera, canvas, E, headG, earL, earR, eyeL, eyeR, tailP;
+  var trunkSeg = [], open = false, talking = false, hopT = 0, lift = 0, mx = 0, my = 0, nextBlink = 2, blinkT = 0;
+  var running = false, fr = 0, last = 0, RED = 0xe10600;
+  function mat(c) { return new THREE.MeshStandardMaterial({ color: c, roughness: 0.78, metalness: 0.04, flatShading: true }); }
+  function sph(r, c, sx, sy, sz) {
+    var m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat(c));
+    m.scale.set(sx, sy, sz);
+    return m;
+  }
+  function build() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(36, 1, 0.1, 50);
+    camera.position.set(0, 0.5, 7.8); camera.lookAt(0, 0.4, 0);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    var key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(3, 5, 6); scene.add(key);
+    var rim = new THREE.PointLight(0xff2a1a, 1.3, 14); rim.position.set(-3, 2, 3); scene.add(rim);
+    E = new THREE.Group(); scene.add(E);
+    var BODY = 0x4d3f41, SKIN = 0x5e4e50;
+    E.add(sph(1.0, BODY, 1.1, 1.0, 1.0));
+    [-1, 1].forEach(function (sx) {
+      [-1, 1].forEach(function (sz) {
+        var leg = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.8, 10), mat(BODY));
+        leg.position.set(sx * 0.58, -0.78, sz * 0.45); E.add(leg);
+        var foot = sph(0.34, SKIN, 1, 0.45, 1.15); foot.position.set(sx * 0.58, -1.16, sz * 0.45 + 0.04); E.add(foot);
+      });
+    });
+    tailP = new THREE.Group(); tailP.position.set(0, 0.2, -1.0); E.add(tailP);
+    var tail = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.07, 0.6, 8), mat(BODY)); tail.position.set(0, -0.3, -0.05); tailP.add(tail);
+    var tip = sph(0.1, RED, 1, 1.4, 1); tip.position.set(0, -0.66, -0.05); tailP.add(tip);
+    var scarf = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.14, 10, 24), mat(RED)); scarf.rotation.x = Math.PI / 2; scarf.position.set(0, 0.66, 0.3); E.add(scarf);
+    var knot = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.62, 0.1), mat(RED)); knot.position.set(0.32, 0.38, 1.04); knot.rotation.z = 0.2; E.add(knot);
+    headG = new THREE.Group(); headG.position.set(0, 1.25, 0.5); E.add(headG);
+    headG.add(sph(0.9, SKIN, 1, 0.96, 0.96));
+    function ear(s) {
+      var p = new THREE.Group(); p.position.set(s * 0.72, 0.2, -0.2);
+      var e1 = sph(0.62, BODY, 1, 1.05, 0.13); e1.position.set(s * 0.5, -0.05, 0); p.add(e1);
+      var e2 = sph(0.44, RED, 0.85, 0.9, 0.11); e2.position.set(s * 0.5, -0.05, 0.075); p.add(e2);
+      headG.add(p);
+      return p;
+    }
+    earL = ear(-1); earR = ear(1);
+    function eye(s) {
+      var g = new THREE.Group(); g.position.set(s * 0.34, 0.16, 0.77);
+      g.add(sph(0.17, 0xffffff, 1, 1, 1));
+      var p = sph(0.095, 0x0b0304, 1, 1, 1); p.position.set(0, 0, 0.12); g.add(p);
+      var ch = sph(0.11, 0x8a2a2a, 1, 0.7, 0.45); ch.position.set(s * 0.21, -0.28, -0.1); g.add(ch);
+      headG.add(g);
+      return { g: g, p: p };
+    }
+    eyeL = eye(-1); eyeR = eye(1);
+    for (var i = 0; i < 8; i++) { var seg = sph(0.27 - i * 0.02, SKIN, 1, 1, 1); headG.add(seg); trunkSeg.push(seg); }
+  }
+  function trunk(t) {
+    var a = 0, y = -0.2, z = 0.8;
+    for (var i = 0; i < trunkSeg.length; i++) {
+      a += -0.22 + lift * 0.4 + Math.sin(t * 2.4 - i * 0.6) * (0.05 + i * 0.012) * (1 + lift);
+      y += Math.sin(a) * 0.19; z += Math.cos(a) * 0.19;
+      trunkSeg[i].position.set(0, y, z);
+    }
+  }
+  function tick(ms) {
+    if (!running) return;
+    requestAnimationFrame(tick);
+    if (!canvas.isConnected) { running = false; return; }
+    var tourEl = document.getElementById("tour");
+    if (tourEl && !tourEl.hidden) return;
+    if ((fr++ & 1) && !reduce) return;
+    var t = reduce ? 0 : ms / 1000, dt = Math.min(0.06, (ms - last) / 1000) || 0.033;
+    last = ms;
+    hopT = Math.max(0, hopT - dt * 1.6);
+    E.position.y = Math.sin(t * 1.8) * 0.07 + Math.sin(hopT * Math.PI) * 0.6;
+    var lively = open || talking;
+    lift += (((lively || (t % 8) < 1.8) ? 1 : 0.1) - lift) * 0.08;
+    headG.rotation.y += (mx * 0.5 - headG.rotation.y) * 0.1;
+    headG.rotation.x += (my * 0.25 + Math.sin(hopT * Math.PI) * 0.2 + (talking ? Math.sin(t * 14) * 0.07 : 0) - headG.rotation.x) * 0.15;
+    var fl = Math.sin(t * (lively ? 5 : 2.4)) * (lively ? 0.18 : 0.1) + Math.sin(hopT * 20) * 0.15 * hopT;
+    earL.rotation.y = -(0.28 + fl); earR.rotation.y = 0.28 + fl;
+    tailP.rotation.z = Math.sin(t * 3) * 0.35;
+    if (t > nextBlink) { blinkT = 0.14; nextBlink = t + 2.5 + Math.abs(Math.sin(t * 7)) * 2.5; }
+    blinkT -= dt;
+    var sy = blinkT > 0 ? 0.12 : 1;
+    eyeL.g.scale.y = sy; eyeR.g.scale.y = sy;
+    eyeL.p.position.x = mx * 0.04; eyeR.p.position.x = mx * 0.04;
+    eyeL.p.position.y = -my * 0.035; eyeR.p.position.y = -my * 0.035;
+    trunk(t);
+    renderer.render(scene, camera);
+  }
+  function resize() {
+    if (!renderer) return;
+    var w = Math.max(60, canvas.clientWidth), h = Math.max(60, canvas.clientHeight);
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  api.init = function (cv) {
+    canvas = cv;
+    try { renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }); } catch (err) { return; }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    build(); resize();
+    api.ok = true;
+    window.addEventListener("resize", resize);
+    window.addEventListener("pointermove", function (e) {
+      var r = canvas.getBoundingClientRect();
+      mx = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / (window.innerWidth / 2)));
+      my = Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height / 2)) / (window.innerHeight / 2)));
+    });
+    running = true; last = performance.now();
+    requestAnimationFrame(tick);
+  };
+  api.setOpen = function (b) { open = !!b; };
+  api.talk = function (b) { talking = !!b; };
+  api.hop = function () { hopT = 1; };
+})();
+</script>
+
+<script>
+/*ENGINE-START*/
+var HE = (function () {
+  var DAY = 864e5;
+  function parseDate(s) { var p = s.split("-"); return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])); }
+  function addDays(d, n) { return new Date(d.getTime() + n * DAY); }
+  function daysBetween(a, b) { return Math.round((b - a) / DAY); }
+  var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function nice(d) { return d.getUTCDate() + " " + MON[d.getUTCMonth()]; }
+  function iso(d) { return d.toISOString().slice(0, 10); }
+  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  function titleCase(s) { return s.replace(/\S+/g, function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); }); }
+  function re(words) { return new RegExp("(?:" + words.join("|") + ")", "gi"); }
+
+  var RX = {
+    access: re(["\\bpasswords?\\b", "\\bcredentials?\\b", "\\btokens?\\b", "\\bsecrets?\\b", "\\bapi[- ]?keys?\\b", "\\bkey\\b", "\\bvault\\b", "\\badmin\\b", "\\blogin\\b", "\\bssh\\b", "\\bcertificates?\\b", "\\bpermissions?\\b", "\\bservice account\\b", "\\bsso\\b", "\\baccess\\b"]),
+    knowledge: re(["\\bonly (?:i|she|he|they)\\b", "\\bnobody else\\b", "\\bno one else\\b", "\\bnot documented\\b", "\\bnothing written\\b", "\\bundocumented\\b", "\\btribal\\b", "\\bsteps are in\\b", "\\boutdated\\b", "\\bmanual(?:ly)?\\b", "\\bworkaround\\b", "\\bin my dms?\\b", "\\bonly invited me\\b", "\\bpersonal notes\\b", "\\bnobody has\\b", "\\bwho owns\\b", "\\bdon't know\\b", "\\bask [a-z]+"]),
+    decision: re(["\\bdecided\\b", "\\bdecision\\b", "\\bagreed\\b", "\\bwe(?:'ll| will) go with\\b", "\\bgoing with\\b", "\\bchose\\b", "\\bapproved\\b", "\\binstead of\\b", "\\bsettled on\\b", "\\bkeeping\\b", "\\bwill ship\\b"]),
+    work: re(["\\bpr\\b", "\\bpull request\\b", "\\bwip\\b", "\\btodo\\b", "\\bopen(?:ed)?\\b", "\\bunmerged\\b", "\\bin progress\\b", "\\bblocked\\b", "\\bwaiting\\b", "\\bpending\\b", "\\breview comments?\\b", "\\bfailing\\b", "\\bdue\\b", "\\bdeadline\\b", "\\bassigned\\b", "\\bunassigned\\b", "\\bbacklog\\b", "\\bstalled\\b", "\\bno commits\\b", "\\bneeds\\b", "\\bmerged\\b", "\\bfix(?:es|ed)?\\b", "\\bupdate\\b"])
+  };
+  var WEIGHT = { access: 3, knowledge: 2.5, decision: 2, work: 1 };
+  var ORDER = ["access", "knowledge", "decision", "work"];
+  var NOOWNER = /\b(unassigned|no owner|nobody owns|no one owns|orphaned)\b/i;
+  var RISK = /\b(blocked|stalled|waiting|failing|no commits|overdue|unmerged|wip|needs tests|comments? open|still open|late)\b/i;
+  var DONE = /\b(merged|closed|resolved|shipped|released|completed|done)\b/i;
+  var NOTDONE = /\b(unmerged|not (?:yet )?(?:merged|done|shipped))\b/i;
+  var STOP = { Note: 1, Todo: 1, Update: 1, Reminder: 1, Warning: 1, Fyi: 1, Edit: 1 };
+
+  function parseLine(l) {
+    var m = l.match(/^\s*\[?(\d{4}-\d{2}-\d{2})\]?\s*[-–:]?\s*/);
+    var date = m ? parseDate(m[1]) : null;
+    var body = m ? l.slice(m[0].length) : l;
+    var dues = (body.match(/\d{4}-\d{2}-\d{2}/g) || []).map(parseDate);
+    var first = (body.split(/\s+/)[0] || "").toLowerCase().replace(/[:,]$/, "");
+    var source = "Note";
+    if (first === "pr" || first === "pull") source = "PR";
+    else if (first === "commit") source = "Commit";
+    else if (/^[a-z][a-z0-9]+-\d+$/.test(first)) source = "Ticket";
+    else if (first.charAt(0) === "#") source = "Chat";
+    else if (first === "email" || first === "mail") source = "Email";
+    else if (/^(doc|docs|wiki|runbook)$/.test(first)) source = "Doc";
+    else if (first === "vault" || first === "secrets") source = "Vault";
+    else if (first === "calendar" || first === "cal") source = "Calendar";
+    else if (first === "slack" || first === "chat" || first === "dm") source = "Chat";
+    var refs = [];
+    body.replace(/\bPR\s?#?(\d+)\b/gi, function (x, n) { var k = "PR #" + n; if (refs.indexOf(k) < 0) refs.push(k); return x; });
+    body.replace(/\b([A-Z][A-Z0-9]+-\d+)\b/g, function (x, k) { if (refs.indexOf(k) < 0) refs.push(k); return x; });
+    var stripped = body.replace(/^(?:pr\s?#?\d+|pull request\s?#?\d+|commit\s+[0-9a-f]{6,}|[a-z][a-z0-9]+-\d+|#[\w-]+|email|mail|docs?\s+\S+|wiki\s+\S+|runbook\s+\S+|vault|secrets|calendar|cal|slack|chat|dm)\s*/i, "");
+    var speaker = null, message = stripped;
+    var sp = stripped.match(/^([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)(?:\s+(?:opened|merged|closed|commented|reviewed|updated|assigned))?\s*:\s*/);
+    if (sp && !STOP[sp[1]]) { speaker = sp[1]; message = stripped.slice(sp[0].length); }
+    else {
+      var sp2 = stripped.match(/([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s*:\s*/);
+      if (sp2 && !STOP[sp2[1]]) { speaker = sp2[1]; message = stripped.slice(stripped.indexOf(sp2[0]) + sp2[0].length); }
+    }
+    return { raw: l, date: date, body: body, message: message, speaker: speaker, source: source, refs: refs, dues: dues };
+  }
+
+  function score(body) {
+    var s = { access: 0, knowledge: 0, decision: 0, work: 0 };
+    ORDER.forEach(function (k) {
+      var c = (body.match(RX[k]) || []).length;
+      if (c) s[k] = WEIGHT[k] * (1 + 0.15 * (Math.min(c, 4) - 1));
+    });
+    return s;
+  }
+  function cleanTitle(msg) {
+    msg = msg.replace(/\s+/g, " ").replace(/[.\s]+$/, "");
+    if (msg.length > 96) msg = msg.slice(0, 96).replace(/\s+\S*$/, "") + "…";
+    return msg.charAt(0).toUpperCase() + msg.slice(1);
+  }
+  function top(counter, exclude) {
+    var best = null, bc = 0;
+    Object.keys(counter).forEach(function (k) { if (k !== exclude && counter[k] > bc) { best = k; bc = counter[k]; } });
+    return best;
+  }
+  function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
+
+  function analyze(text, cfg) {
+    var leaver = titleCase((cfg.leaver || "").trim());
+    var succ = titleCase((cfg.succ || "").trim());
+    var lines = text.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(function (s) { return s && !/^\/\//.test(s) && !/^#\s/.test(s); });
+    var recs = lines.map(parseLine);
+
+    var known = [];
+    function addKnown(n) { if (n && known.indexOf(n) < 0) known.push(n); }
+    addKnown(leaver); addKnown(succ);
+    recs.forEach(function (r) { if (r.speaker && r.speaker.indexOf(" ") > 0) addKnown(r.speaker); });
+    function canon(n) {
+      if (!n) return null;
+      if (n.indexOf(" ") > 0) return n;
+      var f = n.toLowerCase();
+      for (var i = 0; i < known.length; i++) if (known[i].split(/\s+/)[0].toLowerCase() === f) return known[i];
+      return n;
+    }
+    recs.forEach(function (r) { r.speaker = canon(r.speaker); if (r.speaker) addKnown(r.speaker); });
+    recs.forEach(function (r) {
+      var set = [];
+      if (r.speaker) set.push(r.speaker);
+      known.forEach(function (k) {
+        var f = k.split(/\s+/)[0];
+        if (f && set.indexOf(k) < 0 && new RegExp("\\b" + escRe(f) + "\\b", "i").test(r.body)) set.push(k);
+      });
+      r.people = set;
+      r.involvesLeaver = !leaver || set.indexOf(leaver) >= 0;
+    });
+
+    var ext = [], seenExt = {};
+    recs.forEach(function (r) {
+      if (cfg.onlyLeaver && leaver && !r.involvesLeaver) return;
+      var m = r.body.match(/(?:contact|call|rep|vendor|account manager|lead)\s+(?:is\s+)?([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:at|from)\s+([A-Z][A-Za-z0-9&]+)/);
+      if (m) {
+        var key = m[1] + "@" + m[2];
+        if (!seenExt[key]) { seenExt[key] = 1; ext.push({ name: m[1], org: m[2], note: cleanTitle(r.message), date: r.date }); }
+      }
+      (r.body.match(/[A-Za-z0-9._+-]+@[A-Za-z0-9-]+\.[A-Za-z.]+/g) || []).forEach(function (x) {
+        if (!seenExt[x]) { seenExt[x] = 1; ext.push({ name: x, org: "", note: cleanTitle(r.message), date: r.date }); }
+      });
+      var o = r.body.match(/(?:call|meeting|renewal|sync)\s+with\s+([A-Z][A-Za-z0-9&]+)/);
+      if (o && !m && known.every(function (k) { return k.split(/\s+/)[0] !== o[1]; }) && !ext.some(function (x) { return x.org === o[1]; })) {
+        ext.push({ name: "", org: o[1], note: cleanTitle(r.message), date: r.date });
+      }
+    });
+
+    var parent = recs.map(function (_, i) { return i; });
+    function find(i) { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[b] = a; }
+    var refMap = {};
+    recs.forEach(function (r, i) {
+      r.refs.forEach(function (ref) { if (refMap[ref] !== undefined) union(refMap[ref], i); else refMap[ref] = i; });
+    });
+    var groups = {};
+    recs.forEach(function (r, i) { var g = find(i); (groups[g] = groups[g] || []).push(r); });
+
+    var allDates = recs.filter(function (r) { return r.date; }).map(function (r) { return r.date.getTime(); });
+    var refDate = allDates.length ? new Date(Math.max.apply(null, allDates)) : new Date();
+    var lastDay = cfg.lastDay ? parseDate(cfg.lastDay) : addDays(refDate, 14);
+
+    var items = [], doneItems = [], keptLines = 0, threads = 0;
+    Object.keys(groups).forEach(function (gk) {
+      var g = groups[gk];
+      if (cfg.onlyLeaver && leaver && !g.some(function (r) { return r.involvesLeaver; })) return;
+      var tot = { access: 0, knowledge: 0, decision: 0, work: 0 };
+      var best = {};
+      g.forEach(function (r) {
+        var s = score(r.body);
+        ORDER.forEach(function (k) {
+          tot[k] += s[k];
+          if (!best[k] || s[k] > best[k].s) best[k] = { s: s[k], r: r };
+        });
+      });
+      var cat = null, cv = 0;
+      ORDER.forEach(function (k) { if (tot[k] > cv) { cat = k; cv = tot[k]; } });
+      if (!cat) return;
+      threads += 1; keptLines += g.length;
+
+      var dated = g.filter(function (r) { return r.date; }).sort(function (a, b) { return a.date - b.date; });
+      var lastRec = dated.length ? dated[dated.length - 1] : g[g.length - 1];
+      var lastDate = dated.length ? lastRec.date : null;
+      var counter = {};
+      g.forEach(function (r) { r.people.forEach(function (p) { counter[p] = (counter[p] || 0) + 1; }); });
+      var others = Object.keys(counter).filter(function (p) { return p !== leaver; });
+      var refs = uniq([].concat.apply([], g.map(function (r) { return r.refs; })));
+      var sources = uniq(g.map(function (r) { return r.source; }));
+      var dues = [].concat.apply([], g.map(function (r) { return r.dues; })).sort(function (a, b) { return a - b; });
+      var due = dues.length ? dues[0] : null;
+      var stale = lastDate ? daysBetween(lastDate, refDate) : 0;
+      var titleRec = best[cat].r;
+      var title = (refs.length ? refs.slice(0, 2).join(" · ") + " · " : "") + cleanTitle(titleRec.message);
+      var anyText = g.map(function (r) { return r.body; }).join(" ");
+      var lastText = lastRec.body;
+      var owner = succ || "Unassigned";
+      var topOther = top(counter, leaver);
+      var status = "ok", pill = "", pillClass = "ok", next = "", fact = "";
+      var factBits = [g.length + (g.length === 1 ? " entry" : " linked entries") + " (" + sources.join(", ") + ")."];
+
+      if (cat === "work") {
+        var isDone = DONE.test(lastText) && !NOTDONE.test(lastText);
+        if (isDone) status = "done";
+        else if (NOOWNER.test(anyText) || others.length === 0) status = "none";
+        else if (RISK.test(anyText) || stale >= 14 || (due && due <= lastDay)) status = "risk";
+        if (status === "ok" || status === "risk") owner = topOther || owner;
+        if (stale >= 14) factBits.push("No activity for " + stale + " days.");
+        if (status !== "none" && others.length) factBits.push("Also involved: " + others.join(", ") + ".");
+        if (status === "none" && !NOOWNER.test(anyText)) factBits.push("No one else has touched it.");
+        if (due) factBits.push("Due " + nice(due) + (due <= lastDay ? ", before the last day." : "."));
+        pill = status === "none" ? "No owner" : status === "risk" ? "At risk" : status === "done" ? "Complete" : "On track";
+        pillClass = status === "none" ? "none" : status === "risk" ? "risk" : "ok";
+        next = status === "none" ? "Pick an owner and brief them on the current state."
+          : status === "risk" ? "Walk " + owner + " through the open blockers and agree who finishes it."
+            : "Confirm " + owner + " has repo and ticket access.";
+      } else if (cat === "knowledge") {
+        owner = topOther || owner;
+        pill = "Undocumented"; pillClass = "risk";
+        if (dues.length) factBits.push("Date mentioned: " + nice(dues[0]) + ".");
+        if (others.length) factBits.push("Also involved: " + others.join(", ") + ".");
+        next = /\?|who owns/i.test(anyText) ? "Answer the open question in writing and name an owner."
+          : "Record a 20-minute walkthrough and add it to the runbook.";
+      } else if (cat === "access") {
+        owner = succ || topOther || "Unassigned";
+        var single = /\b(only|my account|personal|nobody|mine)\b/i.test(anyText);
+        pill = single ? "Single holder" : "Transfer"; pillClass = "none";
+        next = /vault|personal/i.test(anyText) ? "Move the secret from a personal vault to the team vault, then rotate it after the last day."
+          : "Transfer ownership to " + owner + " and rotate the credential after the last day.";
+      } else {
+        owner = topOther || succ || "Unassigned";
+        var captured = /\b(adr|decision record)\b/i.test(anyText) && !/\b(will|later|todo)\b/i.test(anyText);
+        pill = captured ? "Captured" : "Log it"; pillClass = captured ? "ok" : "risk";
+        if (others.length) factBits.push("Also involved: " + others.join(", ") + ".");
+        next = captured ? "Link the decision record from the project readme." : "Write a short decision record: the choice, the reason and the alternatives rejected.";
+      }
+      fact = factBits.join(" ");
+
+      var doBy = addDays(lastDay, { access: -2, knowledge: -5, decision: -7, work: -3 }[cat]);
+      if (cat === "work" && due && due < doBy) doBy = due;
+
+      var trace = g.slice().sort(function (a, b) { return (a.date || 0) - (b.date || 0); }).map(function (r) {
+        return (r.date ? iso(r.date) : "undated") + " · " + r.source + " · " + (r.speaker ? r.speaker + ": " : "") + cleanTitle(r.message);
+      });
+      var it = { people: others, solo: others.length === 0, cat: cat, title: title, status: status, pill: pill, pillClass: pillClass, fact: fact, next: next, owner: owner, doBy: doBy, trace: trace, resolved: false, lastDate: lastDate };
+      if (status === "done") doneItems.push(it); else items.push(it);
+    });
+
+    var sev = { none: 0, risk: 1, ok: 2 };
+    items.sort(function (a, b) {
+      if (a.cat !== b.cat) return ORDER.indexOf(a.cat) - ORDER.indexOf(b.cat);
+      var sa = sev[a.status] === undefined ? 1 : sev[a.status], sb = sev[b.status] === undefined ? 1 : sev[b.status];
+      if (sa !== sb) return sa - sb;
+      return (b.lastDate || 0) - (a.lastDate || 0);
+    });
+    var people = known.filter(function (k) { return k !== leaver; });
+    var wk = {};
+    recs.forEach(function (r) {
+      if (r.date && r.involvesLeaver) {
+        var k = iso(addDays(r.date, -((r.date.getUTCDay() + 6) % 7)));
+        wk[k] = (wk[k] || 0) + 1;
+      }
+    });
+    var weeks = Object.keys(wk).sort().map(function (k) { return { start: k, label: nice(parseDate(k)), count: wk[k] }; });
+    return {
+      leaver: leaver, succ: succ, lastDay: lastDay, refDate: refDate, items: items, done: doneItems, people: people, weeks: weeks, externals: ext, checks: {}, signTime: {}, signoff: {},
+      stats: { scanned: recs.length, threads: threads, ignored: recs.length - keptLines, produced: items.length + doneItems.length }
+    };
+  }
+
+  function penalty(it) {
+    if (it.resolved) return 0;
+    if (it.cat === "work") {
+      if (it.status === "none") return it.owner === "Unassigned" ? 9 : 3;
+      if (it.status === "risk") return 6;
+      return 1;
+    }
+    if (it.cat === "knowledge") return 5;
+    if (it.cat === "access") return 5;
+    return it.pill === "Log it" ? 2 : 0;
+  }
+  function readiness(items) {
+    var p = 0;
+    items.forEach(function (it) { p += penalty(it); });
+    return Math.max(5, Math.round(100 - p));
+  }
+  var SECT = [["work", "Work in flight"], ["knowledge", "Knowledge only they hold"], ["access", "Access to transfer"], ["decision", "Decisions to preserve"]];
+  function markdown(S) {
+    var out = ["# Handover: " + (S.leaver || "Team member"), "",
+      "- Last day: " + iso(S.lastDay),
+      "- Successor: " + (S.succ || "not set"),
+      "- Readiness: " + readiness(S.items) + "%", ""];
+    SECT.forEach(function (s) {
+      var list = S.items.filter(function (i) { return i.cat === s[0]; });
+      if (!list.length) return;
+      out.push("## " + s[1], "");
+      list.forEach(function (it) {
+        out.push("- [" + (it.resolved ? "x" : " ") + "] **" + it.title + "** (" + it.pill + ")");
+        out.push("  - Owner: " + it.owner + " · Do by: " + iso(it.doBy));
+        out.push("  - Context: " + it.fact);
+        out.push("  - Next: " + it.next);
+      });
+      out.push("");
+    });
+    if (S.done.length) {
+      out.push("## Already complete", "");
+      S.done.forEach(function (it) { out.push("- " + it.title); });
+      out.push("");
+    }
+    var ct = contacts(S);
+    if (ct.length) {
+      out.push("## People and contacts", "");
+      ct.forEach(function (c) { out.push("- " + c.name + " (" + c.kind + "): " + c.note); });
+      out.push("");
+    }
+    out.push("## Last-day checklist", "");
+    checklist(S).forEach(function (c) { out.push("- [" + (S.checks && S.checks[c.text] ? "x" : " ") + "] " + c.text + " (by " + iso(c.due) + ")"); });
+    out.push("", "## Handover meeting agenda", "");
+    agenda(S).forEach(function (a) {
+      out.push("- " + a.at + "  " + a.title);
+      a.ask.forEach(function (q) { out.push("  - " + q); });
+    });
+    out.push("", "## Sign-off", "");
+    SIGN.forEach(function (s) { out.push("- [" + (S.signoff && S.signoff[s[0]] ? "x" : " ") + "] " + s[1] + (S.signoff && S.signoff[s[0]] && S.signTime && S.signTime[s[0]] ? " (signed " + S.signTime[s[0]] + ")" : "")); });
+    var allSigned = SIGN.every(function (s) { return S.signoff && S.signoff[s[0]]; });
+    out.push("", "**Status: " + (allSigned ? "APPROVED " + SIGN.map(function (s) { return S.signTime && S.signTime[s[0]]; }).sort().slice(-1)[0] : "pending sign-off") + "**");
+    out.push("");
+    return out.join("\n");
+  }
+
+  var SIGN = [
+    ["meeting", "Handover meeting held with the manager present"],
+    ["successor", "Successor has read the packet and accepts the owners"],
+    ["leaver", "Leaving member confirms nothing else is held only by them"]
+  ];
+  var ASK = {
+    work: ["What is left to finish, and what blocks it?", "Who has to approve or review the last step?"],
+    knowledge: ["Walk through it live while the successor records the steps.", "What goes wrong most often, and how do you spot it?"],
+    access: ["Who else could hold this, and how is it rotated?", "What breaks if it is revoked today?"],
+    decision: ["What was decided, and what was rejected?", "What would make the team revisit it?"]
+  };
+  function trunc(s, n) { return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  function byRisk(S) {
+    return S.items.filter(function (i) { return !i.resolved; }).sort(function (a, b) { return penalty(b) - penalty(a); });
+  }
+  function contacts(S) {
+    var out = [], cnt = {};
+    S.items.forEach(function (it) { (it.people || []).forEach(function (p) { cnt[p] = (cnt[p] || 0) + 1; }); });
+    S.people.forEach(function (p) {
+      var n = cnt[p] || 0;
+      if (!n && p !== S.succ) return;
+      out.push({ name: p, kind: p === S.succ ? "successor" : "internal", note: n + (n === 1 ? " handover item involves them" : " handover items involve them") });
+    });
+    out.sort(function (a, b) { return (a.kind === "successor" ? 0 : 1) - (b.kind === "successor" ? 0 : 1); });
+    (S.externals || []).forEach(function (x) {
+      out.push({ name: x.name || x.org, kind: "external", note: (x.name && x.org ? x.org + ". " : "") + x.note });
+    });
+    return out;
+  }
+  function checklist(S) {
+    var L = S.leaver || "the leaving member", succ = S.succ || "the successor", out = [], ld = S.lastDay;
+    function add(g, text, due) { out.push({ g: g, text: text, due: due }); }
+    S.items.forEach(function (it) {
+      if (it.cat === "access") add("Access and accounts", "Hand over: " + trunc(it.title, 80), it.doBy);
+      if (it.cat === "knowledge") add("Knowledge capture", "Record or write up: " + trunc(it.title, 80), it.doBy);
+      if (it.cat === "decision" && it.pill === "Log it") add("Knowledge capture", "Write the decision record: " + trunc(it.title, 80), it.doBy);
+      if (it.cat === "work" && (it.status === "none" || it.status === "risk")) add("Work", "Reassign to " + it.owner + ": " + trunc(it.title, 80), it.doBy);
+    });
+    add("Access and accounts", "Remove " + L + " from admin roles, shared inboxes and group aliases", ld);
+    add("Access and accounts", "Revoke SSO, VPN and code-host access at the end of the last day", ld);
+    add("Access and accounts", "Rotate shared secrets that " + L + " knew", addDays(ld, 1));
+    if ((S.externals || []).length) add("People", "Introduce " + succ + " to each external contact", addDays(ld, -3));
+    add("People", "Update on-call, escalation and distribution lists", addDays(ld, -2));
+    add("People", "Forward email and calendar invites to " + succ, ld);
+    return out;
+  }
+  function agenda(S) {
+    var rows = [{ mins: 5, title: "Scope, goals and last-day timeline", ask: ["Agree what done looks like by " + nice(S.lastDay) + "."] }];
+    byRisk(S).slice(0, 5).forEach(function (it) { rows.push({ mins: 8, title: trunc(it.title, 90), ask: ASK[it.cat] }); });
+    rows.push({ mins: 5, title: "People and external contacts to introduce", ask: ["Who needs an introduction before the last day?"] });
+    rows.push({ mins: 10, title: "Open questions and sign-off", ask: ["What would you want to know on day one in this role?"] });
+    var at = 0;
+    rows.forEach(function (r) { r.at = Math.floor(at / 60) + ":" + ("0" + (at % 60)).slice(-2); at += r.mins; });
+    rows.total = at;
+    return rows;
+  }
+  function summary(S) {
+    var open = byRisk(S), out = [];
+    out.push("Handover: " + (S.leaver || "team member") + ", last day " + iso(S.lastDay) + ". Readiness " + readiness(S.items) + "%.", "");
+    out.push(open.length + " open items. Start with:");
+    open.slice(0, 3).forEach(function (it, i) { out.push((i + 1) + ". " + trunc(it.title, 90) + " (owner " + it.owner + ", by " + nice(it.doBy) + ")"); });
+    out.push("", "Full packet and checklist are attached.");
+    return out.join("\n");
+  }
+  return { analyze: analyze, readiness: readiness, markdown: markdown, nice: nice, iso: iso, SECT: SECT, penalty: penalty, checklist: checklist, agenda: agenda, contacts: contacts, summary: summary, SIGN: SIGN };
+})();
+/*ENGINE-END*/
+</script>
+
+<script>
+(function () {
+  var SAMPLE = [
+    "[2026-09-03] #payments Priya: decided to use idempotency keys instead of queue dedupe, Dev agreed. Will write ADR later.",
+    "[2026-09-12] PR #482 Priya opened: webhook retry rewrite, WIP, needs tests",
+    "[2026-09-20] JIRA-2104 Priya: keeping legacy refund table until Q1, agreed with Lena",
+    "[2026-09-28] commit a3f9c21 Priya: add exponential backoff to webhook retries (PR #482)",
+    "[2026-10-02] PR #482 Dev Menon: 2 review comments open, waiting on Priya",
+    "[2026-10-05] #random Priya: lunch on Friday? anyone in",
+    "[2026-10-06] JIRA-2291 Priya: reconcile failed refunds, no commits yet, blocked on finance export",
+    "[2026-10-08] #payments Priya: only I know how to roll back the nightly ledger export, steps are in my DMs, nothing written down",
+    "[2026-10-10] email Priya: acquirer weekend contact is Sam at Northbank, nobody else has the number",
+    "[2026-10-11] vault Priya: payments sandbox admin role is only on my account",
+    "[2026-10-13] commit b81e7d0 Priya: rotate prod deploy key on batch host, key lives in my personal vault",
+    "[2026-10-14] #general Dev Menon: reminder that the office is closed Monday",
+    "[2026-10-15] JIRA-2291 Lena Okafor: finance export schema changes next sprint, due 2026-11-20",
+    "[2026-10-17] doc runbook_v3 Priya: nightly ledger export runbook is outdated, manual workaround for duplicate rows",
+    "[2026-10-20] #payments Priya: we agreed to ship webhook retries behind a feature flag for one release",
+    "[2026-10-22] PR #488 Priya merged: fix timezone bug in ledger export",
+    "[2026-10-24] calendar Priya: vendor renewal call with Northbank on 2026-11-18, only invited me",
+    "[2026-10-27] JIRA-2310 Priya: unassigned, update API docs for refunds endpoint, due 2026-11-12",
+    "[2026-10-28] #payments Tomas Berg: who owns the cron on the batch host? ask Priya",
+    "[2026-10-29] PR #482 Priya: still unmerged, tests failing on retry timeout"
+  ].join("\n");
+
+  var $ = function (id) { return document.getElementById(id); };
+  var raw = $("raw"), result = $("result");
+  var S = null, view = "packet", filter = "all", openOnly = false, riskOnly = false, query = "";
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function scene(v) {
+    if (window.handoverScene) window.handoverScene.set(v);
+    var fb = $("flip");
+    if (fb) fb.textContent = v > 0.5 ? "Scatter the cube" : "Assemble the cube";
+  }
+
+  /* ---- interactive 3D graph: leaver at the centre, handover items around them, people on the outer ring ---- */
+  var Graph = (function () {
+    var ok = !!window.THREE, renderer, scene3, camera, root, canvas, cont, tipEl, center, ray, mouse;
+    var nodes = [], pickers = [], items = [];
+    var yaw = 0.6, pitch = 0.28, drag = false, lx = 0, ly = 0, travelled = 0, hov = -1, shown = -2;
+    var running = false, loopId = 0, W = 300, H = 400, px = 0, py = 0, hasMouse = false;
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var api = { onPick: null };
+    var COL = { work: 0xff3b2f, knowledge: 0xf0786b, access: 0x1a0b0b, decision: 0x8c6a68 };
+
+    function setMouse(e) {
+      var r = canvas.getBoundingClientRect();
+      px = e.clientX - r.left; py = e.clientY - r.top; hasMouse = true;
+      mouse.x = (px / r.width) * 2 - 1; mouse.y = -(py / r.height) * 2 + 1;
+    }
+    function pickAt() {
+      if (!hasMouse || !pickers.length) return -1;
+      ray.setFromCamera(mouse, camera);
+      var h = ray.intersectObjects(pickers, false)[0];
+      return h ? h.object.userData.idx : -1;
+    }
+    function init() {
+      if (renderer || !ok) return;
+      canvas = document.createElement("canvas");
+      canvas.className = "gcanvas";
+      try { renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true }); } catch (err) { ok = false; return; }
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      scene3 = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
+      camera.position.set(0, 0, 13);
+      root = new THREE.Group();
+      scene3.add(root);
+      ray = new THREE.Raycaster();
+      mouse = new THREE.Vector2();
+      canvas.addEventListener("pointerdown", function (e) {
+        setMouse(e); drag = true; lx = e.clientX; ly = e.clientY; travelled = 0;
+        try { canvas.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      });
+      canvas.addEventListener("pointermove", function (e) {
+        setMouse(e);
+        if (drag) {
+          var dx = e.clientX - lx, dy = e.clientY - ly;
+          lx = e.clientX; ly = e.clientY;
+          yaw += dx * 0.008; pitch = Math.max(-1.2, Math.min(1.2, pitch + dy * 0.006));
+          travelled += Math.abs(dx) + Math.abs(dy);
+        }
+      });
+      canvas.addEventListener("pointerup", function () {
+        drag = false;
+        if (travelled < 6) { var i = pickAt(); if (i >= 0 && api.onPick) api.onPick(i); }
+      });
+      canvas.addEventListener("pointercancel", function () { drag = false; });
+      canvas.addEventListener("pointerleave", function () { hasMouse = false; });
+      window.addEventListener("resize", function () { if (running) resize(); });
+    }
+    function resize() {
+      if (!renderer || !cont) return;
+      W = Math.max(280, cont.clientWidth);
+      H = Math.round(Math.max(360, Math.min(560, W * 0.8)));
+      renderer.setSize(W, H);
+      camera.aspect = W / H;
+      camera.updateProjectionMatrix();
+    }
+    function clearRoot() {
+      while (root.children.length) {
+        var c = root.children[0];
+        root.remove(c);
+        c.traverse(function (o) {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+        });
+      }
+    }
+    function label(text, color) {
+      var c = document.createElement("canvas");
+      c.width = 512; c.height = 96;
+      var g = c.getContext("2d");
+      g.font = "500 34px 'IBM Plex Mono', monospace";
+      g.fillStyle = color || "#1a0b0b"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(text.length > 24 ? text.slice(0, 23) + "…" : text, 256, 48);
+      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
+      sp.scale.set(2.9, 0.54, 1);
+      return sp;
+    }
+    function lineSeg(arr, color, op) {
+      var g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(arr), 3));
+      return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: op }));
+    }
+    function build(S, pen) {
+      init();
+      if (!ok) return;
+      clearRoot();
+      nodes = []; pickers = []; items = S.items; hov = -1; shown = -2;
+      var n = items.length, R = 3.7, pos = [], spokes = [], links = [], owners = [], ownerPos = {};
+      center = new THREE.Mesh(new THREE.OctahedronGeometry(0.62), new THREE.MeshBasicMaterial({ color: 0xe10600 }));
+      center.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.OctahedronGeometry(0.95)), new THREE.LineBasicMaterial({ color: 0xff3b2f })));
+      root.add(center);
+      var cl = label((S.leaver || "Leaving").toUpperCase() + " · LEAVING", "#d10a00");
+      cl.position.set(0, 1.4, 0);
+      root.add(cl);
+      items.forEach(function (it) { if (owners.indexOf(it.owner) < 0) owners.push(it.owner); });
+      items.forEach(function (it, i) {
+        var y = 1 - 2 * (i + 0.5) / n, rr = Math.sqrt(Math.max(0, 1 - y * y)), ph = i * 2.399963;
+        var p = new THREE.Vector3(Math.cos(ph) * rr * R, y * R, Math.sin(ph) * rr * R);
+        pos.push(p);
+        var w = pen(it), rad = it.resolved ? 0.11 : 0.15 + Math.min(w, 9) * 0.02;
+        var col = it.resolved ? 0xc9b3b1 : COL[it.cat];
+        var m = new THREE.Mesh(new THREE.SphereGeometry(rad, 20, 14), new THREE.MeshBasicMaterial({ color: col }));
+        m.position.copy(p); m.userData.idx = i;
+        root.add(m); pickers.push(m);
+        var halo = new THREE.Mesh(new THREE.SphereGeometry(rad * 2.2, 16, 12), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: it.resolved ? 0.05 : 0.14, depthWrite: false }));
+        halo.position.copy(p);
+        root.add(halo);
+        nodes.push({ mesh: m, halo: halo, pulse: !it.resolved && w >= 5, i: i });
+        spokes.push(0, 0, 0, p.x, p.y, p.z);
+      });
+      owners.forEach(function (o, k) {
+        var a = (k / owners.length) * Math.PI * 2 + 0.4, un = o === "Unassigned";
+        var cnt = items.filter(function (it) { return it.owner === o && !it.resolved; }).length;
+        var P = new THREE.Vector3(Math.cos(a) * 6.6, k % 2 ? 1.2 : -1.2, Math.sin(a) * 6.6);
+        ownerPos[o] = P;
+        var s = Math.min(cnt, 8) * 0.04;
+        var og = new THREE.Mesh(new THREE.OctahedronGeometry(0.28 + s), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        og.position.copy(P);
+        og.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.OctahedronGeometry(0.28 + s)), new THREE.LineBasicMaterial({ color: un ? 0xe10600 : 0x1a0b0b })));
+        root.add(og);
+        var ol = label(o + " · " + cnt, un ? "#d10a00" : "#1a0b0b");
+        ol.position.set(P.x, P.y + 0.9, P.z);
+        root.add(ol);
+      });
+      items.forEach(function (it, i) {
+        var P = ownerPos[it.owner];
+        if (P) links.push(pos[i].x, pos[i].y, pos[i].z, P.x, P.y, P.z);
+      });
+      if (spokes.length) root.add(lineSeg(spokes, 0xf0b5b0, 0.9));
+      if (links.length) root.add(lineSeg(links, 0xe10600, 0.55));
+    }
+    function render(t) {
+      if (!drag && !reduce) yaw += 0.003;
+      root.rotation.y = yaw; root.rotation.x = pitch;
+      if (center) center.rotation.y = t * 0.7;
+      nodes.forEach(function (nd) {
+        if (nd.pulse && !reduce) { var s = 1 + 0.2 * Math.sin(t * 3 + nd.i); nd.mesh.scale.setScalar(s); nd.halo.scale.setScalar(s); }
+      });
+      root.updateMatrixWorld(true);
+      hov = drag ? -1 : pickAt();
+      canvas.style.cursor = hov >= 0 ? "pointer" : drag ? "grabbing" : "grab";
+      if (tipEl) {
+        if (hov >= 0 && items[hov]) {
+          if (hov !== shown) {
+            var it = items[hov];
+            tipEl.innerHTML = "<b>" + esc(it.cat) + " · " + esc(it.pill) + "</b>" + esc(it.title) + "<span>Owner " + esc(it.owner) + " · do by " + HE.nice(it.doBy) + "</span>";
+          }
+          tipEl.hidden = false;
+          tipEl.style.left = Math.max(8, Math.min(px + 14, W - 250)) + "px";
+          tipEl.style.top = Math.max(8, Math.min(py + 14, H - 120)) + "px";
+        } else tipEl.hidden = true;
+      }
+      shown = hov;
+      renderer.render(scene3, camera);
+    }
+    function start() {
+      var id = ++loopId;
+      running = true;
+      (function step(ms) {
+        if (!running || id !== loopId) return;
+        if (!canvas.isConnected) { running = false; return; }
+        requestAnimationFrame(step);
+        render(ms / 1000);
+      })(performance.now());
+    }
+    api.mount = function (el) {
+      init();
+      if (!ok) { el.textContent = "The 3D graph needs WebGL, which this browser does not provide."; return; }
+      cont = el;
+      el.insertBefore(canvas, el.firstChild);
+      tipEl = el.querySelector("#tip");
+      resize();
+    };
+    api.build = build;
+    api.show = function () { if (!ok) return; resize(); start(); };
+    api.hide = function () { running = false; loopId++; };
+    return api;
+  })();
+
+  function filterBar() {
+    var c = { work: 0, knowledge: 0, access: 0, decision: 0 };
+    S.items.forEach(function (i) { c[i.cat]++; });
+    var chips = [["all", "All " + S.items.length], ["work", "Work " + c.work], ["knowledge", "Knowledge " + c.knowledge], ["access", "Access " + c.access], ["decision", "Decisions " + c.decision]];
+    return '<div class="chips">' + chips.map(function (x) {
+      return '<button class="chip" type="button" data-f="' + x[0] + '" aria-pressed="false">' + x[1] + "</button>";
+    }).join("") + '<button class="chip" type="button" id="riskonly" aria-pressed="false">Risks only</button><button class="chip" type="button" id="openonly" aria-pressed="false">Hide resolved</button></div>' +
+      '<div class="searchrow"><label class="lbl" for="q">Search the packet</label><input type="text" id="q" value="' + esc(query) + '" placeholder="Type a person, ticket, PR or word" autocomplete="off" spellcheck="false"></div>' +
+      '<p class="help" id="nomatch" hidden>No items match. Clear the search or the filters.</p>';
+  }
+  function applyFilter() {
+    Array.prototype.forEach.call(result.querySelectorAll("#v-packet .it"), function (el) {
+      var miss = query && el.textContent.toLowerCase().indexOf(query) < 0;
+      el.hidden = (riskOnly && +el.getAttribute("data-p") < 3) || !!miss;
+    });
+    Array.prototype.forEach.call(result.querySelectorAll("#v-packet .group"), function (g) {
+      var c = g.getAttribute("data-cat");
+      var empty = g.querySelector(".it") && !g.querySelector(".it:not([hidden])");
+      g.hidden = (filter !== "all" && c !== filter) || !!empty;
+    });
+    var pk = $("v-packet");
+    if (pk) pk.classList.toggle("openonly", openOnly);
+    var nm = $("nomatch");
+    if (nm) nm.hidden = !!result.querySelector("#v-packet .it:not([hidden])") || !(query || riskOnly);
+    Array.prototype.forEach.call(result.querySelectorAll("[data-f]"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-f") === filter ? "true" : "false");
+    });
+    var oo = $("openonly");
+    if (oo) oo.setAttribute("aria-pressed", openOnly ? "true" : "false");
+    var ro = $("riskonly");
+    if (ro) ro.setAttribute("aria-pressed", riskOnly ? "true" : "false");
+  }
+  function pick(i) {
+    filter = "all";
+    setView("packet");
+    var el = result.querySelector('.it[data-i="' + i + '"]');
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+    }
+  }
+  Graph.onPick = pick;
+  function graphShell() {
+    return '<div class="legend"><span><i style="background:#1a0b0b"></i>Access</span><span><i style="background:#f0786b"></i>Knowledge</span>' +
+      '<span><i style="background:#8c6a68"></i>Decision</span><span><i style="background:#ff3b2f"></i>Work</span><span><i class="sq"></i>Person</span></div>' +
+      '<div class="gwrap" id="gwrap"><div class="tip" id="tip" hidden></div></div>' +
+      '<p class="help" style="margin-top:10px">Larger, pulsing nodes carry more risk. Drag to rotate, hover for details, click a node to open it in the packet.</p>';
+  }
+  function showGraph() {
+    if (!S || !$("gwrap")) return;
+    Graph.mount($("gwrap"));
+    Graph.build(S, HE.penalty);
+    Graph.show();
+  }
+  function planHtml() {
+    var now = new Date();
+    var t0 = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    var left = Math.round((S.lastDay.getTime() - t0) / 864e5);
+    var open = S.items.filter(function (i) { return !i.resolved; });
+    var h = '<div class="plan"><div class="count"><div class="big">' + Math.abs(left) + "<small> days</small></div><div class=\"band\">" +
+      (left >= 0 ? "left until " : "since ") + (S.leaver ? esc(S.leaver) + "'s" : "the") + " last day, " + HE.nice(S.lastDay) + "</div></div>";
+    var top = open.slice().sort(function (a, b) { return HE.penalty(b) - HE.penalty(a); }).slice(0, 4);
+    h += "<div><h3>Start here" + (S.succ ? ", " + esc(S.succ.split(" ")[0]) : "") + "</h3>";
+    if (!top.length) h += '<p class="help" style="margin-top:12px">Everything is resolved.</p>';
+    else h += '<ol class="start">' + top.map(function (it, k) {
+      return '<li><span class="rank">' + (k + 1) + '</span><div><div class="tt">' + esc(it.title) + '</div><div class="nx">' + esc(it.next) + " Owner: " + esc(it.owner) + ".</div></div></li>";
+    }).join("") + "</ol>";
+    h += "</div>";
+    var by = {};
+    open.forEach(function (it) { var k = HE.iso(it.doBy); (by[k] = by[k] || []).push(it); });
+    var keys = Object.keys(by).sort();
+    if (keys.length) {
+      h += '<div><h3>Handover calendar</h3><div class="cal">' + keys.map(function (k) {
+        var d = new Date(k + "T00:00:00Z"), dl = Math.round((d.getTime() - t0) / 864e5);
+        return '<div class="calrow"><div class="d">' + HE.nice(d) + "<small>" + (dl < 0 ? Math.abs(dl) + " days ago" : dl === 0 ? "today" : "in " + dl + " days") + "</small></div><ul>" +
+          by[k].map(function (it) { return "<li><em>" + esc(it.cat) + "</em>" + esc(it.title) + "</li>"; }).join("") + "</ul></div>";
+      }).join("") + "</div></div>";
+    }
+    var load = {};
+    open.forEach(function (it) { load[it.owner] = (load[it.owner] || 0) + 1; });
+    var names = Object.keys(load).sort(function (a, b) { return load[b] - load[a]; });
+    if (names.length) {
+      var mxl = load[names[0]];
+      h += "<div><h3>Load by owner</h3>" + names.map(function (nm) {
+        return '<div class="loadrow"><span class="nm">' + esc(nm) + '</span><span class="tr"><i style="width:' + Math.round(load[nm] / mxl * 100) + '%"></i></span><span>' + load[nm] + "</span></div>";
+      }).join("");
+      if (open.length > 3 && load[names[0]] / open.length > 0.6) h += '<p class="help" style="margin-top:12px">' + esc(names[0]) + " would carry more than 60% of the open items. Spread them before the last day.</p>";
+      h += "</div>";
+    }
+    if (S.weeks && S.weeks.length) {
+      var wm = Math.max.apply(null, S.weeks.map(function (w) { return w.count; }));
+      h += "<div><h3>Activity before they leave</h3><div class=\"weeks\">" + S.weeks.map(function (w) {
+        return '<div class="wk"><span>' + w.count + '</span><i style="height:' + Math.round(w.count / wm * 80) + 'px"></i><span>' + esc(w.label) + "</span></div>";
+      }).join("") + '</div><p class="help" style="margin-top:8px">Entries per week involving ' + esc(S.leaver || "them") + ", week starting Monday.</p></div>";
+    }
+    return h + "</div>";
+  }
+  function meetingHtml() {
+    var ag = HE.agenda(S), ct = HE.contacts(S);
+    var h = '<div class="plan"><div><h3>Handover meeting, ' + ag.total + ' minutes</h3>' +
+      '<p class="help" style="margin-top:10px">Invite ' + esc(S.leaver || "the leaving member") + ", " + esc(S.succ || "the successor") +
+      " and the manager. Record the session so each walkthrough becomes a how-to guide. Items are ordered by risk.</p>" +
+      '<ol class="agenda">' + ag.map(function (a) {
+        return '<li><span class="tm">' + a.at + '</span><div><div class="tt">' + esc(a.title) + '</div><ul class="qs">' +
+          a.ask.map(function (q) { return "<li>" + esc(q) + "</li>"; }).join("") + "</ul></div></li>";
+      }).join("") + "</ol></div>";
+    h += '<div><h3>People to introduce</h3><div class="contacts">' + (ct.length ? ct.map(function (c) {
+      return '<div class="contact"><span class="nm">' + esc(c.name) + '</span><span class="pill ' + (c.kind === "external" ? "none" : "ok") + '">' + esc(c.kind) + '</span><span class="nt">' + esc(c.note) + "</span></div>";
+    }).join("") : '<p class="help">No other people appear in these entries.</p>') + "</div></div>";
+    var ld = S.lastDay.getTime();
+    var ci = [[7, "Has the successor had to ask " + (S.leaver || "the leaver") + " anything? Write each answer into the runbook."],
+      [30, "Run this generator on the successor's activity. Is any item still unowned or stalled?"],
+      [90, "Review the runbooks and decision records touched during the handover. Fix anything out of date."]];
+    h += '<div><h3>After the last day</h3><div class="checkins">' + ci.map(function (c) {
+      return "<div><b>+" + c[0] + " days · " + HE.nice(new Date(ld + c[0] * 864e5)) + "</b><span>" + esc(c[1]) + "</span></div>";
+    }).join("") + "</div></div></div>";
+    return h;
+  }
+  function ckCount() {
+    var list = HE.checklist(S), n = 0;
+    list.forEach(function (c) { if (S.checks[c.text]) n++; });
+    var so = 0;
+    HE.SIGN.forEach(function (s) { if (S.signoff[s[0]]) so++; });
+    return n + " of " + list.length + " tasks done · " + so + " of " + HE.SIGN.length + " sign-offs";
+  }
+  function checklistHtml() {
+    var list = HE.checklist(S), order = ["Work", "Access and accounts", "Knowledge capture", "People"];
+    var h = '<div class="plan"><div class="ckprog" id="ckprog">' + ckCount() + "</div>";
+    order.forEach(function (g) {
+      var rows = list.filter(function (c) { return c.g === g; });
+      if (!rows.length) return;
+      h += "<div><h3>" + esc(g) + '</h3><ul class="cklist">' + rows.map(function (c) {
+        var on = !!S.checks[c.text];
+        return '<li class="' + (on ? "resolved" : "") + '"><label><input type="checkbox" class="ck" data-k="' + esc(c.text) + '"' + (on ? " checked" : "") + '><span class="tx">' + esc(c.text) + '</span><span class="due">' + HE.nice(c.due) + "</span></label></li>";
+      }).join("") + "</ul></div>";
+    });
+    h += '<div><h3>Sign-off</h3><div class="approval" id="approval" aria-live="polite"></div><div class="signoff">' + HE.SIGN.map(function (s) {
+      return '<label><input type="checkbox" class="so" data-k="' + s[0] + '"' + (S.signoff[s[0]] ? " checked" : "") + "><span>" + esc(s[1]) + "</span></label>";
+    }).join("") + "</div></div></div>";
+    return h;
+  }
+  function stamp() { return new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
+  function approvalHtml() {
+    var left = HE.SIGN.filter(function (s) { return !S.signoff[s[0]]; });
+    if (!left.length) {
+      var last = HE.SIGN.map(function (s) { return S.signTime[s[0]] || ""; }).sort().slice(-1)[0];
+      return { done: true, html: "<b>Handover approved</b><span>All " + HE.SIGN.length + " sign-offs collected" + (last ? ", last at " + esc(last) : "") + ". Copy Markdown now includes the approval record.</span>" };
+    }
+    return { done: false, html: "<b>Not approved yet</b><span>" + (HE.SIGN.length - left.length) + " of " + HE.SIGN.length + " sign-offs. Waiting for: " + left.map(function (s) { return esc(s[1]); }).join("; ") + ".</span>" };
+  }
+  function paintApproval() {
+    var a = $("approval");
+    if (!a || !S) return;
+    var r = approvalHtml();
+    a.className = "approval" + (r.done ? " done" : "");
+    a.innerHTML = r.html;
+  }
+
+  function emptyHtml(title, msg) {
+    return '<div class="empty"><h3>' + esc(title) + "</h3><p>" + esc(msg) + "</p></div>";
+  }
+
+  function itemHtml(it, i) {
+    var opts = ["Unassigned"].concat(S.people);
+    if (opts.indexOf(it.owner) < 0) opts.push(it.owner);
+    var sel = '<select class="own" aria-label="Owner">' + opts.map(function (p) {
+      return "<option" + (p === it.owner ? " selected" : "") + ">" + esc(p) + "</option>";
+    }).join("") + "</select>";
+    return '<article class="it' + (it.resolved ? " resolved" : "") + '" data-i="' + i + '" data-p="' + HE.penalty(it) + '">' +
+      '<input type="checkbox" aria-label="Mark resolved"' + (it.resolved ? " checked" : "") + ">" +
+      "<div><div class=\"l1\"><span class=\"title\">" + esc(it.title) + '</span><span class="pill ' + it.pillClass + '">' + esc(it.pill) + "</span></div>" +
+      '<p class="fact">' + esc(it.fact) + "</p>" +
+      '<p class="next"><b>Next</b>' + esc(it.next) + "</p>" +
+      '<div class="meta"><label>Owner ' + sel + "</label><span>Do by " + HE.nice(it.doBy) + "</span></div>" +
+      "<details><summary>Trace (" + it.trace.length + (it.trace.length === 1 ? " entry" : " entries") + ")</summary><ol>" +
+      it.trace.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ol></details></div></article>";
+  }
+
+  function render() {
+    if (!S) return;
+    var st = S.stats;
+    var counts = { work: 0, knowledge: 0, access: 0, decision: 0 };
+    S.items.forEach(function (i) { counts[i.cat]++; });
+    var html =
+      '<div class="head"><div><div class="big" id="score">0<small>%</small></div><div class="band" id="band"></div></div>' +
+      '<div class="who"><div class="band">Handover packet</div><h2>' + esc(S.leaver || "Team member") + '</h2>' +
+      '<div class="meta"><span>Last day ' + HE.nice(S.lastDay) + "</span><span>Successor " + esc(S.succ || "not set") + "</span></div>" +
+      '<div class="bar"><i id="fill"></i></div></div></div>' +
+      '<div class="funnel"><b>' + st.scanned + "</b> entries scanned <span class=\"arr\">→</span> <b>" + st.threads + "</b> linked threads <span class=\"arr\">→</span> <b>" +
+      st.produced + "</b> handover items <span>(" + st.ignored + " entries had no handover signal)</span></div>" +
+      '<div class="counts"><div><b id="c-open">0</b><span>Open items</span></div><div><b id="c-none">0</b><span>No owner</span></div><div><b id="c-know">0</b><span>Undocumented</span></div><div><b id="c-solo">0</b><span>Solo-held</span></div><div><b id="c-res">0</b><span>Resolved</span></div></div>' +
+      '<div class="tabs" role="tablist"><button class="tab" role="tab" id="t-packet" aria-selected="true" type="button">Packet</button>' +
+      '<button class="tab" role="tab" id="t-graph" aria-selected="false" type="button">3D graph</button>' +
+      '<button class="tab" role="tab" id="t-plan" aria-selected="false" type="button">Plan</button>' +
+      '<button class="tab" role="tab" id="t-meeting" aria-selected="false" type="button">Meeting</button>' +
+      '<button class="tab" role="tab" id="t-check" aria-selected="false" type="button">Checklist</button>' +
+      '<button class="tab" role="tab" id="t-md" aria-selected="false" type="button">Markdown</button></div>' +
+      '<div class="actions"><button class="btn ghost" id="copysum" type="button">Copy summary</button>' +
+      '<button class="btn solid" id="copy" type="button">Copy Markdown</button></div>' +
+      '<div id="v-packet">' + filterBar();
+    var idx = 0;
+    var map = [];
+    S.items.forEach(function (it, i) { map.push(i); });
+    HE.SECT.forEach(function (s) {
+      var list = [];
+      S.items.forEach(function (it, i) { if (it.cat === s[0]) list.push(i); });
+      if (!list.length) return;
+      html += '<div class="group" data-cat="' + s[0] + '"><h3>' + s[1] + "<span>" + list.length + " item" + (list.length === 1 ? "" : "s") + "</span></h3>" +
+        list.map(function (i) { return itemHtml(S.items[i], i); }).join("") + "</div>";
+    });
+    if (S.done.length) {
+      html += '<div class="group"><h3>Already complete<span>' + S.done.length + '</span></h3><ul class="done-list" style="padding:0">' +
+        S.done.map(function (d) { return "<li>" + esc(d.title) + "</li>"; }).join("") + "</ul></div>";
+    }
+    html += '</div><div id="v-graph" hidden>' + graphShell() + '</div><div id="v-plan" hidden></div><div id="v-meeting" hidden></div><div id="v-check" hidden></div><div id="v-md" hidden><pre class="md" id="md"></pre></div>';
+    result.innerHTML = html;
+    setView(view);
+    refresh(true);
+  }
+
+  function setView(v) {
+    view = v;
+    if (!$("v-packet")) return;
+    ["packet", "graph", "plan", "meeting", "check", "md"].forEach(function (k) {
+      var el = $("v-" + k), tb = $("t-" + k);
+      if (el) el.hidden = k !== v;
+      if (tb) tb.setAttribute("aria-selected", k === v ? "true" : "false");
+    });
+    if (v === "graph") showGraph(); else Graph.hide();
+    if (v === "packet") applyFilter();
+  }
+
+  function refresh(animate) {
+    if (!S) return;
+    var r = HE.readiness(S.items);
+    var open = 0, none = 0, know = 0, res = 0, solo = 0;
+    S.items.forEach(function (i) {
+      if (i.resolved) res++; else { open++; if (i.cat === "work" && i.status === "none" && i.owner === "Unassigned") none++; if (i.cat === "knowledge") know++; if (i.solo) solo++; }
+    });
+    $("score").innerHTML = r + "<small>%</small>";
+    $("band").textContent = r < 40 ? "Critical gaps" : r < 70 ? "Needs work" : "Ready to hand over";
+    $("c-open").textContent = open; $("c-none").textContent = none; $("c-know").textContent = know; $("c-res").textContent = res; $("c-solo").textContent = solo;
+    var fill = $("fill");
+    if (animate) { fill.style.width = "0"; requestAnimationFrame(function () { requestAnimationFrame(function () { fill.style.width = r + "%"; }); }); }
+    else fill.style.width = r + "%";
+    $("md").textContent = HE.markdown(S);
+    $("v-plan").innerHTML = planHtml();
+    $("v-meeting").innerHTML = meetingHtml();
+    $("v-check").innerHTML = checklistHtml();
+    paintApproval();
+    if (view === "graph") showGraph();
+  }
+
+  result.addEventListener("click", function (e) {
+    var t = e.target;
+    var chip = t.closest ? t.closest("[data-f]") : null;
+    if (t.id === "t-packet") setView("packet");
+    else if (t.id === "t-graph") setView("graph");
+    else if (t.id === "t-plan") setView("plan");
+    else if (t.id === "t-meeting") setView("meeting");
+    else if (t.id === "t-check") setView("check");
+    else if (t.id === "copysum") copySummary(t);
+    else if (t.id === "t-md") setView("md");
+    else if (chip) { filter = chip.getAttribute("data-f"); applyFilter(); }
+    else if (t.id === "openonly") { openOnly = !openOnly; applyFilter(); }
+    else if (t.id === "riskonly") { riskOnly = !riskOnly; applyFilter(); }
+    else if (t.id === "copy") copyMd(t);
+  });
+  result.addEventListener("input", function (e) {
+    if (e.target && e.target.id === "q") { query = e.target.value.trim().toLowerCase(); applyFilter(); }
+  });
+  result.addEventListener("change", function (e) {
+    var cl = e.target.classList;
+    if (S && cl && (cl.contains("ck") || cl.contains("so"))) {
+      var key = e.target.getAttribute("data-k");
+      (cl.contains("so") ? S.signoff : S.checks)[key] = e.target.checked;
+      if (cl.contains("so")) { if (e.target.checked) S.signTime[key] = stamp(); else delete S.signTime[key]; paintApproval(); }
+      var li = e.target.closest("li");
+      if (li) li.classList.toggle("resolved", e.target.checked);
+      $("ckprog").textContent = ckCount();
+      $("md").textContent = HE.markdown(S);
+      return;
+    }
+    var art = e.target.closest ? e.target.closest(".it") : null;
+    if (!art || !S) return;
+    var it = S.items[+art.getAttribute("data-i")];
+    if (e.target.type === "checkbox") { it.resolved = e.target.checked; art.classList.toggle("resolved", it.resolved); }
+    else if (e.target.classList.contains("own")) it.owner = e.target.value;
+    refresh(false);
+  });
+
+  function copyMd(btn) {
+    var text = HE.markdown(S), orig = "Copy Markdown";
+    function flash(msg) { btn.textContent = msg; setTimeout(function () { btn.textContent = orig; }, 1800); }
+    function fallback() {
+      setView("md");
+      try {
+        var r = document.createRange(); r.selectNodeContents($("md"));
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        flash("Selected: press copy");
+      } catch (err) { flash("Copy unavailable"); }
+    }
+    try { navigator.clipboard.writeText(text).then(function () { flash("Copied"); }, fallback); } catch (err) { fallback(); }
+  }
+
+  function copySummary(btn) {
+    var text = HE.summary(S), orig = "Copy summary";
+    function flash(m) { btn.textContent = m; setTimeout(function () { btn.textContent = orig; }, 1800); }
+    try { navigator.clipboard.writeText(text).then(function () { flash("Copied"); }, function () { flash("Copy blocked"); }); } catch (err) { flash("Copy blocked"); }
+  }
+
+  function generate(scroll) {
+    var text = raw.value;
+    if (!text.trim()) {
+      S = null; scene(0); Graph.hide();
+      result.innerHTML = emptyHtml("No activity yet", "Paste entries on the left, upload an export, or load the sample, then generate.");
+      return;
+    }
+    query = "";
+    S = HE.analyze(text, { leaver: $("leaver").value, succ: $("succ").value, lastDay: $("last").value, onlyLeaver: $("only").checked });
+    if (!S.items.length && !S.done.length) {
+      scene(0.15); Graph.hide();
+      result.innerHTML = emptyHtml("Nothing to hand over", "No entries matched work, decision, knowledge or access signals" + ($("only").checked ? " for this person. Try unchecking the filter or check the name." : ".") + " Use the entry format shown under the input.");
+      return;
+    }
+    render();
+    scene(1);
+    if (scroll && window.innerWidth <= 980) result.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function fromJson(txt) {
+    try {
+      var arr = JSON.parse(txt);
+      if (!Array.isArray(arr)) return txt;
+      return arr.map(function (o) {
+        if (typeof o === "string") return o;
+        var d = o.date || o.timestamp || "", s = o.source || o.type || "", a = o.author || o.user || o.person || "";
+        return "[" + String(d).slice(0, 10) + "] " + s + " " + (a ? a + ": " : "") + (o.text || o.message || o.title || "");
+      }).join("\n");
+    } catch (err) { return txt; }
+  }
+
+  $("gen").addEventListener("click", function () { generate(true); });
+  /* ---- live GitHub import: pull requests, issues and commits for one person ---- */
+  function ghName(login) {
+    var n = String(login || "").replace(/[^A-Za-z]+/g, " ").trim().toLowerCase().replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
+    return n || "Contributor";
+  }
+  function ghDay(x) { return String(x || "").slice(0, 10); }
+  function ghOne(t) { return String(t || "").split(/\r?\n/)[0].replace(/\(#(\d+)\)/g, "(PR #$1)").replace(/\s+/g, " ").trim(); }
+  function ghSay(msg, kind) { var m = $("ghmsg"); m.textContent = msg; m.className = "ghmsg" + (kind ? " " + kind : ""); }
+  function ghGet(url, tok) {
+    var h = { Accept: "application/vnd.github+json" };
+    if (tok) h.Authorization = "Bearer " + tok;
+    return fetch(url, { headers: h }).then(function (r) {
+      if (r.status === 404) throw new Error("Repository or user not found. Check the spelling, or add a token for a private repository.");
+      if (r.status === 401) throw new Error("GitHub rejected the token.");
+      if (r.status === 403 || r.status === 429) throw new Error("GitHub rate limit reached. Wait a few minutes or add a token.");
+      if (!r.ok) throw new Error("GitHub returned an error (" + r.status + ").");
+      return r.json();
+    });
+  }
+  function ghLines(user, pulls, issues, commits) {
+    var me = user.toLowerCase(), who = ghName(user), out = [], now = Date.now();
+    function mine(o) {
+      if (o.user && o.user.login && o.user.login.toLowerCase() === me) return true;
+      return (o.assignees || []).concat(o.requested_reviewers || []).some(function (a) { return a && a.login && a.login.toLowerCase() === me; });
+    }
+    function quiet(o) { return o.state === "open" && o.updated_at && (now - Date.parse(o.updated_at)) > 14 * 864e5 ? ", no activity since " + ghDay(o.updated_at) + ", stalled" : ""; }
+    var np = 0, ni = 0, nc = 0;
+    (pulls || []).filter(mine).forEach(function (o) {
+      var st = o.merged_at ? "merged" : (o.state === "closed" ? "closed" : "still open, unmerged");
+      var role = o.user && o.user.login && o.user.login.toLowerCase() === me ? "" : ", review or assignment waiting on " + who;
+      out.push("[" + ghDay(o.created_at) + "] PR #" + o.number + " " + ghName(o.user && o.user.login) + ": " + ghOne(o.title) + (o.draft ? ", WIP" : "") + ", " + st + role + quiet(o)); np++;
+    });
+    (issues || []).filter(function (o) { return !o.pull_request && mine(o); }).forEach(function (o) {
+      var st = o.state === "closed" ? "closed" : "still open" + ((o.assignees || []).length ? "" : ", unassigned");
+      out.push("[" + ghDay(o.created_at) + "] ISSUE-" + o.number + " " + ghName(o.user && o.user.login) + ": " + ghOne(o.title) + ", " + st + quiet(o)); ni++;
+    });
+    (commits || []).forEach(function (o) {
+      var c = o.commit || {};
+      out.push("[" + ghDay(c.author && c.author.date) + "] commit " + String(o.sha || "").slice(0, 7) + " " + who + ": " + ghOne(c.message)); nc++;
+    });
+    out.sort();
+    return { lines: out, np: np, ni: ni, nc: nc, who: who };
+  }
+  $("ghgo").addEventListener("click", function () {
+    var repo = $("ghrepo").value.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\/+$/, "").replace(/\.git$/, "");
+    var user = $("ghuser").value.trim().replace(/^@/, "");
+    var tok = $("ghtok").value.trim();
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { ghSay("Enter the repository as owner/name, for example octocat/Hello-World.", "err"); return; }
+    if (!/^[\w-]+$/.test(user)) { ghSay("Enter the leaver's GitHub username.", "err"); return; }
+    var base = "https://api.github.com/repos/" + repo, btn = $("ghgo");
+    btn.disabled = true; ghSay("Reading " + repo + " from GitHub…");
+    Promise.all([
+      ghGet(base + "/pulls?state=all&per_page=100&sort=updated&direction=desc", tok),
+      ghGet(base + "/issues?state=all&per_page=100&sort=updated&direction=desc", tok),
+      ghGet(base + "/commits?author=" + encodeURIComponent(user) + "&per_page=50", tok)
+    ]).then(function (r) {
+      var g = ghLines(user, r[0], r[1], r[2]);
+      if (!g.lines.length) { ghSay("No pull requests, issues or commits by or assigned to " + user + " in the latest 100 of " + repo + ".", "err"); return; }
+      raw.value = g.lines.join("\n");
+      $("leaver").value = g.who;
+      $("only").checked = true;
+      ghSay("Imported " + g.lines.length + " entries: " + g.np + " pull requests, " + g.ni + " issues, " + g.nc + " commits. Set the successor and last day, then review.", "ok");
+      generate(true);
+    }).catch(function (e) {
+      ghSay(e && e.message && e.message.indexOf("Failed to fetch") < 0 ? e.message : "Could not reach GitHub. Check your connection and try again.", "err");
+    }).then(function () { btn.disabled = false; });
+  });
+  $("sample").addEventListener("click", function () { raw.value = SAMPLE; $("leaver").value = "Priya Nair"; $("succ").value = "Dev Menon"; $("last").value = "2026-11-14"; generate(true); });
+  $("clear").addEventListener("click", function () { raw.value = ""; generate(false); });
+  $("file").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      var t = String(rd.result || "");
+      raw.value = /\.json$/i.test(f.name) ? fromJson(t) : t;
+      generate(true);
+    };
+    rd.readAsText(f);
+  });
+
+  /* ---- interactive 3D tour: Ember explains each step, the person picks options, Apply fills the generator ---- */
+  var tour = { step: 0, role: "manager", src: { code: true, tickets: true, chat: true, docs: true, vault: true, cal: true }, scope: "leaver", focus: "all", last: "keep", tab: "auto", data: "example" };
+  var SRC = [
+    ["code", "Code", "PRs and commits", 0xff3b2f],
+    ["tickets", "Tickets", "Jira-style issues", 0xff9d90],
+    ["chat", "Chat and email", "Channels and messages", 0x3a2a2a],
+    ["docs", "Docs", "Runbooks and wikis", 0xb3170f],
+    ["vault", "Vault", "Access and secret notes", 0x6b4a4c],
+    ["cal", "Calendar", "Meetings and renewals", 0x8c6a68]
+  ];
+  var tourLast = null, tourTimer = 0, toastT = 0, tourInit = false;
+  var tourReduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function srcOfLine(l) {
+    var body = l.replace(/^\s*\[[^\]]*\]\s*/, ""), f = (body.split(/\s+/)[0] || "").toLowerCase();
+    if (f === "pr" || f === "commit" || f === "pull") return "code";
+    if (/^[a-z][a-z0-9]+-\d+$/.test(f)) return "tickets";
+    if (f === "doc" || f === "runbook" || f === "wiki") return "docs";
+    if (f === "vault") return "vault";
+    if (f === "calendar") return "cal";
+    return "chat";
+  }
+  function sampleFor(src) { return SAMPLE.split("\n").filter(function (l) { return src[srcOfLine(l)]; }).join("\n"); }
+  function radios(name, legend, list, grid) {
+    var h = '<fieldset class="optgrp"><legend>' + legend + "</legend>" + (grid ? '<div class="optgrid">' : "");
+    list.forEach(function (o) {
+      var on = String(tour[name]) === o[0];
+      h += '<label class="opt' + (on ? " on" : "") + '"><input type="radio" name="' + name + '" value="' + o[0] + '" data-k="' + name + '"' + (on ? " checked" : "") + "><span><b>" + o[1] + '</b><span class="d">' + o[2] + "</span></span></label>";
+    });
+    return h + (grid ? "</div>" : "") + "</fieldset>";
+  }
+  function sourcesHtml() {
+    var h = '<fieldset class="optgrp"><legend>Which activity should the example include?</legend><div class="optgrid">';
+    SRC.forEach(function (s) {
+      var on = tour.src[s[0]];
+      h += '<label class="opt' + (on ? " on" : "") + '"><input type="checkbox" value="' + s[0] + '" data-k="src"' + (on ? " checked" : "") + "><span><b>" + s[1] + '</b><span class="d">' + s[2] + "</span></span></label>";
+    });
+    return h + "</div></fieldset>";
+  }
+  function roleTab() { return { manager: "plan", successor: "packet", leaver: "packet" }[tour.role]; }
+  function tabName(t) { return { packet: "Packet", graph: "3D graph", plan: "Plan", meeting: "Meeting", check: "Checklist" }[t]; }
+  function summaryHtml() {
+    var srcs = SRC.filter(function (s) { return tour.src[s[0]]; }).map(function (s) { return s[1]; }).join(", ");
+    var rows = [
+      ["Role", { manager: "Manager", successor: "Taking over", leaver: "Leaving member" }[tour.role]],
+      ["Activity", tour.data === "example" ? srcs : "Your own entries"],
+      ["Entries", tour.scope === "leaver" ? "Only the leaving member's" : "Everything"],
+      ["Show", tour.focus === "risk" ? "Risks only" : "Every item"],
+      ["Last day", tour.last === "keep" ? "As in the form" : "In " + tour.last + " days"],
+      ["Opens on", tabName(tour.tab === "auto" ? roleTab() : tour.tab)]
+    ];
+    return '<dl class="sum">' + rows.map(function (r) { return "<div><dt>" + r[0] + "</dt><dd>" + r[1] + "</dd></div>"; }).join("") + "</dl>";
+  }
+  var STEPS = [
+    { t: "Meet Ember", say: "Hi, I'm Ember. I'll show you how this works, then set it up your way.",
+      body: "Handover Engine turns a leaving teammate's scattered activity into one packet: what is unfinished, what only they know, what access has to move, and who takes each item. The tour takes about a minute.",
+      opts: function () { return radios("role", "What do you need?", [["manager", "I'm the manager", "Plan the handover and watch the risk"], ["successor", "I'm taking over", "See what lands on me first"], ["leaver", "I'm leaving", "Capture what only I know"]]); } },
+    { t: "Collect the activity", say: "Everything starts as loose entries, one per line.",
+      body: "Commits, pull requests, tickets, chat notes, docs, vault notes and calendar events all go into the input box. Choose the kinds of activity the example should include. You can paste your own at any time.",
+      opts: sourcesHtml },
+    { t: "Link related entries", say: "Entries about the same PR or ticket get tied together.",
+      body: "Entries that share a PR or ticket number become one thread, so a ticket, its pull request and the chat that shaped it read as one story. Watch the faded cards drop out when you keep only the leaving member's entries.",
+      opts: function () { return radios("scope", "Which entries count?", [["leaver", "Only the leaving member's", "Ignore unrelated chatter"], ["all", "Everything I paste", "Include entries from the whole team"]]); } },
+    { t: "Rank by risk", say: "Now I sort by what could be lost.",
+      body: "Each thread is classed as work, knowledge, access or a decision, then scored for risk: no owner, blocked, undocumented, or held by a single account. Those points make up the readiness score.",
+      opts: function () { return radios("focus", "What should the packet show?", [["all", "Every item", "Full picture, risky and routine"], ["risk", "Risks only", "Hide on-track and low-risk items"]]); } },
+    { t: "Set the clock", say: "Every item gets a do-by date before the last day.",
+      body: "Access is due 2 days before the last day, work 3 days, knowledge 5 days and decisions 7 days. The plan, calendar, checklist and meeting agenda all follow that date. The ticks show the days you have.",
+      opts: function () { return radios("last", "When is the last working day?", [["7", "In 7 days", "A tight handover"], ["14", "In 14 days", "A usual notice period"], ["30", "In 30 days", "Room to record walkthroughs"], ["keep", "Keep the date in the form", "Leave the last day as it is"]], true); } },
+    { t: "Review and apply", say: "Ready? Check your choices and I'll build the handover.",
+      body: "These choices go into the generator when you press Apply. Afterwards you can change anything in the form and generate again.",
+      opts: function () {
+        return '<div id="tsum">' + summaryHtml() + "</div>" +
+          radios("tab", "Open the result on", [["auto", "Best for my role", "Chosen from your first answer"], ["packet", "Packet", "Every item with owners"], ["graph", "3D graph", "Orbit the handover"], ["plan", "Plan", "Countdown and calendar"], ["meeting", "Meeting", "Agenda and contacts"], ["check", "Checklist", "Last-day tasks and sign-off"]], true) +
+          radios("data", "Input data", [["example", "Load the example entries", "Replaces the input box with the sources you chose"], ["keep", "Keep what is in the box", "Apply the other choices to your own entries"]]);
+      } }
+  ];
+
+  function keepDays() {
+    var v = $("last").value, d = v ? Date.parse(v + "T00:00:00Z") : NaN, n = new Date();
+    var t0 = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+    var k = isNaN(d) ? 15 : Math.round((d - t0) / 864e5);
+    return Math.max(3, Math.min(30, k));
+  }
+  function tourCfg() {
+    var cols = SRC.filter(function (s) { return tour.src[s[0]]; }).map(function (s) { return s[3]; });
+    TourStage.config({ colors: cols, scope: tour.scope === "leaver" ? 1 : 0, focus: tour.focus === "risk" ? 1 : 0, days: tour.last === "keep" ? keepDays() : +tour.last });
+  }
+  function say(text) {
+    var b = $("bubble");
+    clearInterval(tourTimer);
+    speakText(text);
+    if (tourReduce) { b.textContent = text; TourStage.talk(false); return; }
+    var i = 0;
+    b.textContent = "";
+    TourStage.talk(true);
+    tourTimer = setInterval(function () {
+      i++; b.textContent = text.slice(0, i);
+      if (i >= text.length) { clearInterval(tourTimer); TourStage.talk(false); }
+    }, 18);
+  }
+  function renderStep() {
+    var s = STEPS[tour.step], n = STEPS.length;
+    $("tkicker").textContent = "STEP " + (tour.step + 1) + " OF " + n;
+    $("tourTitle").textContent = s.t;
+    $("tbody").textContent = s.body;
+    $("topts").innerHTML = s.opts();
+    $("tback").disabled = tour.step === 0;
+    $("tnext").textContent = tour.step === n - 1 ? "Apply to generator" : "Next";
+    $("tdots").innerHTML = STEPS.map(function (x, i) {
+      return '<button type="button" class="tdot' + (i === tour.step ? " on" : "") + '" data-s="' + i + '" aria-label="Step ' + (i + 1) + ": " + x.t + '"' + (i === tour.step ? ' aria-current="step"' : "") + "></button>";
+    }).join("");
+    TourStage.setStep(tour.step);
+    tourCfg();
+    say(s.say);
+  }
+  function refreshChoices() {
+    Array.prototype.forEach.call($("topts").querySelectorAll(".opt"), function (l) {
+      var inp = l.querySelector("input");
+      l.classList.toggle("on", !!(inp && inp.checked));
+    });
+    var sm = $("tsum");
+    if (sm) sm.innerHTML = summaryHtml();
+    tourCfg();
+  }
+  function openTour() {
+    tourLast = document.activeElement;
+    bauto = false; bstep = -1; stopSpeech(); bpop.hidden = true; MiniEmber.setOpen(false);
+    $("toast").hidden = true;
+    $("tour").hidden = false;
+    document.body.style.overflow = "hidden";
+    if (!tourInit) { tourInit = true; TourStage.init($("tcanvas")); if (!TourStage.ok) $("nogl").hidden = false; }
+    tour.step = 0;
+    TourStage.resize();
+    TourStage.start();
+    renderStep();
+    setTimeout(function () { TourStage.resize(); }, 60);
+    $("tnext").focus();
+  }
+  function closeTour(applied) {
+    clearInterval(tourTimer);
+    stopSpeech();
+    TourStage.talk(false);
+    TourStage.stop();
+    $("tour").hidden = true;
+    document.body.style.overflow = "";
+    if (!applied && tourLast && tourLast.focus) tourLast.focus();
+  }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function toast(m) {
+    var t = $("toast");
+    t.textContent = m; t.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(function () { t.hidden = true; }, 3400);
+  }
+  function applyTour() {
+    if (tour.data === "example") raw.value = sampleFor(tour.src);
+    $("only").checked = tour.scope === "leaver";
+    if (tour.last !== "keep") {
+      var d = new Date();
+      d.setDate(d.getDate() + (+tour.last));
+      $("last").value = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+    }
+    riskOnly = tour.focus === "risk";
+    openOnly = false;
+    var tab = tour.tab === "auto" ? roleTab() : tour.tab;
+    filter = tour.tab === "auto" && tour.role === "leaver" ? "knowledge" : "all";
+    view = tab;
+    generate(false);
+    if (S) { setView(tab); applyFilter(); }
+    $("tool").scrollIntoView({ behavior: tourReduce ? "auto" : "smooth", block: "start" });
+    toast("Applied. Your handover is ready.");
+  }
+  $("tour").addEventListener("click", function (e) {
+    var t = e.target;
+    if (t.id === "tourClose" || t.id === "tour") closeTour();
+    else if (t.id === "tvoice") { toggleVoice(); if (voiceOn) say(STEPS[tour.step].say); }
+    else if (t.id === "tnext") {
+      if (tour.step < STEPS.length - 1) { tour.step++; renderStep(); }
+      else { closeTour(true); applyTour(); }
+    } else if (t.id === "tback") { if (tour.step > 0) { tour.step--; renderStep(); } }
+    else if (t.getAttribute && t.getAttribute("data-s") !== null) { tour.step = +t.getAttribute("data-s"); renderStep(); }
+  });
+  $("tour").addEventListener("change", function (e) {
+    var el = e.target, k = el.getAttribute ? el.getAttribute("data-k") : null;
+    if (!k) return;
+    if (k === "src") {
+      tour.src[el.value] = el.checked;
+      var any = Object.keys(tour.src).some(function (x) { return tour.src[x]; });
+      if (!any) { tour.src[el.value] = true; el.checked = true; }
+    } else tour[k] = el.value;
+    refreshChoices();
+  });
+  document.addEventListener("keydown", function (e) {
+    if ($("tour").hidden) return;
+    if (e.key === "Escape") { closeTour(); return; }
+    if (e.key === "Tab") {
+      var f = $("tour").querySelectorAll("button:not([disabled]), input");
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".tour-open"), function (b) { b.addEventListener("click", openTour); });
+
+  /* ---- Ember the floating helper: drag him to either side, click him for step-by-step help ---- */
+  var BSTEPS = [
+    { t: "Add the activity", d: "Paste one entry per line into the input box, upload an export, or press Load sample.", sel: "#raw" },
+    { t: "Name the people and the date", d: "Enter the leaving member, the successor and the last working day. The plan and checklist count down from that date.", sel: "#leaver" },
+    { t: "Generate the handover", d: "Press Generate handover. The readiness score, the risks and six tabs appear on the right.", sel: "#gen" },
+    { t: "Read the result", d: "Packet lists every item with an owner and a do-by date. 3D graph shows who holds what. Tick items as they get resolved.", sel: "#result .tabs" },
+    { t: "Plan the meeting", d: "Meeting gives a timed agenda and the people to introduce. Checklist holds the last-day tasks and three sign-offs.", sel: "#t-meeting" },
+    { t: "Share it", d: "Copy summary gives a short message for your team. Copy Markdown gives the whole packet for a doc or ticket.", sel: "#copy" }
+  ];
+  var buddy = $("buddy"), bpop = $("bpop"), bbtn = $("bbtn"), bstep = -1, bdragged = false, bdrag = false, bsx = 0, bsy = 0, box = 0, boy = 0, bhint = 0;
+  var bpos = { s: "r", b: 14 };
+  try {
+    var sv = JSON.parse(localStorage.getItem("ember-pos") || "null");
+    if (sv && (sv.s === "l" || sv.s === "r") && typeof sv.b === "number") bpos = sv;
+  } catch (err) { /* ignore */ }
+
+  /* ---- voice: browser speechSynthesis, with a silent timed fallback ---- */
+  var synth = window.speechSynthesis || null, voiceOn = !!synth, voiceObj = null, speakTok = 0, bauto = false, fbTimer = 0;
+  var GREET = "Hi, I'm Ember. I can walk you through this page, start the three D tour, or load an example. Pick one.";
+  try { if (localStorage.getItem("ember-voice") === "off") voiceOn = false; } catch (err) { /* ignore */ }
+  function pickVoice() {
+    if (!synth) return;
+    var vs = synth.getVoices() || [], i;
+    for (i = 0; i < vs.length; i++) if (/^en[-_]US/i.test(vs[i].lang)) { voiceObj = vs[i]; return; }
+    for (i = 0; i < vs.length; i++) if (/^en/i.test(vs[i].lang)) { voiceObj = vs[i]; return; }
+  }
+  if (synth) { pickVoice(); try { synth.addEventListener("voiceschanged", pickVoice); } catch (err) { /* ignore */ } }
+  function talkFx(on) { MiniEmber.talk(on); bpop.classList.toggle("speaking", on); }
+  function stopSpeech() {
+    speakTok++; clearTimeout(fbTimer);
+    if (synth) { try { synth.cancel(); } catch (err) { /* ignore */ } }
+    talkFx(false);
+  }
+  function speakText(text, done) {
+    stopSpeech();
+    var tok = speakTok, fin = false;
+    function finish() {
+      if (fin || tok !== speakTok) return;
+      fin = true; clearTimeout(fbTimer); talkFx(false);
+      if (done) done();
+    }
+    if (!voiceOn || !synth) { fbTimer = setTimeout(finish, 2200 + text.length * 55); return; }
+    try {
+      var u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.02; u.pitch = 1.2; u.lang = "en-US";
+      if (voiceObj) u.voice = voiceObj;
+      u.onstart = function () { if (tok === speakTok) talkFx(true); };
+      u.onend = finish; u.onerror = finish;
+      synth.speak(u);
+      fbTimer = setTimeout(finish, 4000 + text.length * 120);
+    } catch (err) { fbTimer = setTimeout(finish, 2200 + text.length * 55); }
+  }
+  function syncVoice() {
+    Array.prototype.forEach.call(document.querySelectorAll(".js-voice"), function (b) {
+      b.textContent = !synth ? "Voice: n/a" : "Voice: " + (voiceOn ? "on" : "off");
+      b.disabled = !synth;
+      b.setAttribute("aria-pressed", voiceOn ? "true" : "false");
+    });
+  }
+  function toggleVoice() {
+    if (!synth) return;
+    voiceOn = !voiceOn;
+    try { localStorage.setItem("ember-voice", voiceOn ? "on" : "off"); } catch (err) { /* ignore */ }
+    if (!voiceOn) stopSpeech();
+    syncVoice();
+  }
+  function speakStep(i) {
+    var s = BSTEPS[i];
+    speakText(s.t + ". " + s.d, function () {
+      if (bauto && bstep === i && !bpop.hidden) setTimeout(function () { if (bauto && bstep === i) nextStep(); }, 900);
+    });
+  }
+  function nextStep() {
+    if (bstep < BSTEPS.length - 1) goStep(bstep + 1);
+    else finishGuide("That's everything. Click Ember any time for help.");
+  }
+  function finishGuide(msg) {
+    bauto = false; bstep = -1; stopSpeech(); closeBuddy();
+    if (msg) toast(msg);
+  }
+
+  function bApply() {
+    var h = window.innerHeight;
+    bpos.b = Math.max(14, Math.min(h - 132 - 14, bpos.b));
+    buddy.classList.toggle("l", bpos.s === "l");
+    buddy.style.left = ""; buddy.style.top = ""; buddy.style.right = "";
+    buddy.style.bottom = "calc(" + bpos.b + "px + env(safe-area-inset-bottom, 0px))";
+    buddy.classList.toggle("below", h - bpos.b - 132 < 340);
+  }
+  function spot(sel) {
+    var el = document.querySelector(sel);
+    if (!el || el.getClientRects().length === 0) el = $("tool");
+    el.scrollIntoView({ behavior: tourReduce ? "auto" : "smooth", block: "center" });
+    el.classList.remove("spot"); void el.offsetWidth; el.classList.add("spot");
+    setTimeout(function () { el.classList.remove("spot"); }, 3300);
+    setTimeout(function () {
+      if (bpop.hidden) return;
+      var r = el.getBoundingClientRect(), p = bpop.getBoundingClientRect();
+      var hit = r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top;
+      if (hit) { bpos.s = (r.left + r.width / 2) > window.innerWidth / 2 ? "l" : "r"; bApply(); }
+    }, tourReduce ? 60 : 650);
+  }
+  function renderBuddy() {
+    var h = "";
+    if (bstep < 0) {
+      h = '<div class="bp-k">HI, I\'M EMBER</div><div class="bp-t">How can I help?</div>' +
+        '<p class="bp-d">I can walk you through the page and point at each control, start the 3D tour, or load an example for you.</p>' +
+        '<button class="bp-item" data-b="start" type="button">Walk me through it<span>Six short steps. I point at each control.</span></button>' +
+        '<button class="bp-item" data-b="tour" type="button">Start the 3D tour<span>Pick options, then apply them.</span></button>' +
+        '<button class="bp-item" data-b="sample" type="button">Show me an example<span>Loads the sample and opens the packet.</span></button>' +
+        '<a class="bp-item" href="#about" data-b="link">What is this website?<span>Read the About section.</span></a>' +
+        '<div class="bp-opts"><button class="bp-link js-voice" data-b="voice" type="button">Voice</button></div>';
+      $("bdots").innerHTML = "";
+    } else {
+      var s = BSTEPS[bstep];
+      h = '<div class="bp-k">STEP ' + (bstep + 1) + " OF " + BSTEPS.length + '</div><div class="bp-t">' + s.t + '</div><p class="bp-d">' + s.d + "</p>" +
+        '<div class="bp-btns"><button class="btn ghost sm" data-b="back" type="button">' + (bstep === 0 ? "Menu" : "Back") + '</button>' +
+        '<button class="btn ghost sm" data-b="skip" type="button">Skip</button>' +
+        '<button class="btn solid sm" data-b="next" type="button">' + (bstep === BSTEPS.length - 1 ? "Done" : "Next") + "</button></div>" +
+        '<div class="bp-opts"><button class="bp-link" data-b="auto" type="button" aria-pressed="' + bauto + '">Auto-play: ' + (bauto ? "on" : "off") + '</button>' +
+        '<button class="bp-link" data-b="replay" type="button">Replay</button>' +
+        '<button class="bp-link js-voice" data-b="voice" type="button">Voice</button></div>';
+      $("bdots").innerHTML = BSTEPS.map(function (x, i) {
+        return '<button type="button" data-b="go" data-s="' + i + '" class="' + (i === bstep ? "on" : "") + '" aria-label="Step ' + (i + 1) + ": " + x.t + '"></button>';
+      }).join("");
+    }
+    $("bbody").innerHTML = h;
+    syncVoice();
+  }
+  function openBuddy() {
+    clearTimeout(bhint);
+    $("btip").hidden = true;
+    bpop.hidden = false;
+    MiniEmber.setOpen(true); MiniEmber.hop();
+    renderBuddy();
+    if (bstep >= 0) { spot(BSTEPS[bstep].sel); speakStep(bstep); } else speakText(GREET);
+  }
+  function closeBuddy() { stopSpeech(); bpop.hidden = true; MiniEmber.setOpen(false); }
+  function goStep(i) {
+    bstep = i; renderBuddy();
+    if (i >= 0) { spot(BSTEPS[i].sel); speakStep(i); } else { bauto = false; speakText(GREET); }
+  }
+
+  bbtn.addEventListener("click", function () {
+    if (bdragged) { bdragged = false; return; }
+    if (bpop.hidden) openBuddy(); else closeBuddy();
+  });
+  bbtn.addEventListener("pointerdown", function (e) {
+    bdrag = true; bdragged = false; bsx = e.clientX; bsy = e.clientY;
+    var r = buddy.getBoundingClientRect(); box = e.clientX - r.left; boy = e.clientY - r.top;
+    try { bbtn.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+  });
+  bbtn.addEventListener("pointermove", function (e) {
+    if (!bdrag) return;
+    if (!bdragged && Math.abs(e.clientX - bsx) + Math.abs(e.clientY - bsy) < 8) return;
+    bdragged = true;
+    buddy.style.left = (e.clientX - box) + "px"; buddy.style.top = (e.clientY - boy) + "px";
+    buddy.style.right = "auto"; buddy.style.bottom = "auto";
+  });
+  function bEnd() {
+    if (!bdrag) return;
+    bdrag = false;
+    if (!bdragged) return;
+    var r = buddy.getBoundingClientRect();
+    bpos.s = (r.left + r.width / 2) < window.innerWidth / 2 ? "l" : "r";
+    bpos.b = window.innerHeight - r.bottom;
+    bApply();
+    try { localStorage.setItem("ember-pos", JSON.stringify(bpos)); } catch (x) { /* ignore */ }
+  }
+  bbtn.addEventListener("pointerup", bEnd);
+  bbtn.addEventListener("pointercancel", bEnd);
+  window.addEventListener("resize", bApply);
+
+  bpop.addEventListener("click", function (e) {
+    var t = e.target.closest ? e.target.closest("[data-b]") : null;
+    if (!t) { if (e.target.id === "bclose") closeBuddy(); return; }
+    var k = t.getAttribute("data-b");
+    if (k === "start") goStep(0);
+    else if (k === "next") nextStep();
+    else if (k === "skip") finishGuide("Skipped. Click Ember any time for help.");
+    else if (k === "back") goStep(bstep - 1);
+    else if (k === "go") goStep(+t.getAttribute("data-s"));
+    else if (k === "auto") { bauto = !bauto; renderBuddy(); if (bauto) speakStep(bstep); }
+    else if (k === "replay") { spot(BSTEPS[bstep].sel); speakStep(bstep); }
+    else if (k === "voice") { toggleVoice(); if (voiceOn) { if (bstep >= 0) speakStep(bstep); else speakText(GREET); } }
+    else if (k === "tour") { closeBuddy(); openTour(); }
+    else if (k === "sample") { $("sample").click(); setView("packet"); closeBuddy(); }
+    else if (k === "link") closeBuddy();
+  });
+  $("bclose").addEventListener("click", closeBuddy);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !bpop.hidden && $("tour").hidden) { closeBuddy(); bbtn.focus(); } });
+
+  bApply();
+  syncVoice();
+  MiniEmber.init($("bcanvas"));
+  bhint = setTimeout(function () {
+    if (bpop.hidden && $("tour").hidden) { $("btip").hidden = false; MiniEmber.hop(); setTimeout(function () { $("btip").hidden = true; }, 7000); }
+  }, 4500);
+
+  (function () {
+    var flip = $("flip"), grab = $("grab"), glow = $("glow");
+    if (flip) flip.addEventListener("click", function () { scene(window.handoverScene.goal() > 0.5 ? 0 : 1); });
+    if (grab) {
+      var down = false, gx = 0;
+      grab.addEventListener("pointerdown", function (e) { down = true; gx = e.clientX; try { grab.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ } });
+      grab.addEventListener("pointermove", function (e) { if (down) { window.handoverScene.nudge(e.clientX - gx); gx = e.clientX; } });
+      grab.addEventListener("pointerup", function () { down = false; });
+      grab.addEventListener("pointercancel", function () { down = false; });
+    }
+    window.addEventListener("pointermove", function (e) { if (glow) glow.style.transform = "translate(" + e.clientX + "px," + e.clientY + "px)"; });
+    Array.prototype.forEach.call(document.querySelectorAll(".stage"), function (el) {
+      el.addEventListener("pointermove", function (e) {
+        var r = el.getBoundingClientRect();
+        el.style.setProperty("--mx", (e.clientX - r.left) + "px");
+        el.style.setProperty("--my", (e.clientY - r.top) + "px");
+      });
+    });
+  })();
+
+  raw.value = SAMPLE;
+  window.addEventListener("load", function () { setTimeout(function () { generate(false); }, 500); });
+  generate(false);
+})();
+</script>
